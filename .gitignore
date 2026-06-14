@@ -1,0 +1,23 @@
+﻿# Secrets
+.env
+
+# Personal portfolio data
+portfolio.csv
+finanzfluss_export.csv
+
+# Logs & previews
+agent.log
+preview.html
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
