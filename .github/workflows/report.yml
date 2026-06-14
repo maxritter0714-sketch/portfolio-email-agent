@@ -1,0 +1,76 @@
+name: Portfolio Report
+
+on:
+  schedule:
+    - cron: '0 6 * * 6'  # Every Saturday 6am UTC (8am CEST)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force full report regardless of date'
+        type: boolean
+        default: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout portfolio agent
+        uses: actions/checkout@v4
+
+      - name: Checkout data repo
+        uses: actions/checkout@v4
+        with:
+          repository: maxritter0714-sketch/portfolio-agent-data
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          path: _data
+
+      - name: Copy data files into working directory
+        run: |
+          cp _data/finanzfluss_export.csv .
+          cp _data/history.csv . 2>/dev/null || true
+          cp _data/conviction.json . 2>/dev/null || true
+          cp _data/isin_map.json . 2>/dev/null || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt --quiet
+
+      - name: Convert Finanzfluss export to portfolio.csv
+        run: python import_portfolio.py --input finanzfluss_export.csv
+
+      - name: Collect weekly data point
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python agent.py --data-only
+
+      - name: Run full report (second Saturday only, or forced)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
+        run: |
+          if [ "${{ inputs.force }}" = "true" ]; then
+            python agent.py --force
+          else
+            python agent.py
+          fi
+
+      - name: Push updated data back to data repo
+        run: |
+          cp history.csv _data/ 2>/dev/null || true
+          cp conviction.json _data/ 2>/dev/null || true
+          cd _data
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add history.csv conviction.json
+          git diff --cached --quiet || git commit -m "chore: update portfolio data $(date -u +%Y-%m-%d)"
+          git push

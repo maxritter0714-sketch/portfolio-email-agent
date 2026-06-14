@@ -9,6 +9,7 @@ each month; bypass with --force for testing.
 import argparse
 import csv
 import html
+import json
 import logging
 import os
 import re
@@ -17,6 +18,7 @@ import sys
 import tempfile
 import traceback
 from datetime import date
+from pathlib import Path
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -436,6 +438,80 @@ def _pie(ax, sizes: list[float], labels: list[str]) -> None:
     )
 
 
+_HISTORY_PATH = Path("history.csv")
+_HISTORY_COLS = ("date", "issue", "total_value_eur", "sp500_close")
+
+
+def append_history(summary: dict, issue_num: int) -> None:
+    """Append one row to history.csv per calendar day (skips duplicate same-day runs)."""
+    today_str = date.today().isoformat()
+    if _HISTORY_PATH.exists():
+        with open(_HISTORY_PATH, newline="", encoding="utf-8") as fh:
+            existing = list(csv.DictReader(fh))
+        if any(r.get("date") == today_str for r in existing):
+            log.info("History: entry for %s already exists — skipping.", today_str)
+            return
+    sp500_series = _hist_cache.get("^GSPC")
+    if sp500_series is None or sp500_series.empty:
+        log.warning("S&P 500 not in cache — history row will have sp500_close=0")
+        sp500_close = 0.0
+    else:
+        sp500_close = float(sp500_series.iloc[-1])
+    row = {
+        "date": today_str,
+        "issue": issue_num,
+        "total_value_eur": round(summary["total_value_eur"], 2),
+        "sp500_close": round(sp500_close, 4),
+    }
+    write_header = not _HISTORY_PATH.exists()
+    with open(_HISTORY_PATH, "a", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(_HISTORY_COLS))
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+
+
+def generate_history_chart() -> str | None:
+    """Line chart: portfolio value vs S&P 500, both indexed to 100 at first point."""
+    if not _HISTORY_PATH.exists():
+        return None
+    rows: list[dict] = []
+    with open(_HISTORY_PATH, newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    if len(rows) < 6:
+        return None
+
+    labels   = [r["date"] for r in rows]
+    port_raw = [float(r["total_value_eur"]) for r in rows]
+    sp_raw   = [float(r["sp500_close"]) for r in rows]
+
+    base_port = port_raw[0] or 1.0
+    base_sp   = sp_raw[0]   or 1.0
+    port_idx  = [v / base_port * 100 for v in port_raw]
+    sp_idx    = [v / base_sp   * 100 for v in sp_raw]
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(range(len(labels)), port_idx, color=DARK_GOLD, linewidth=2,
+            label="Portfolio", marker="o", markersize=4)
+    ax.plot(range(len(labels)), sp_idx, color=NAVY, linewidth=1.5,
+            linestyle="--", label="S&P 500", marker="o", markersize=3)
+    ax.axhline(100, color=TEXT_SECONDARY, linewidth=0.5, linestyle=":")
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(
+        [f"#{r['issue']}" for r in rows],
+        fontsize=7, color=TEXT_PRIMARY, fontfamily="serif", rotation=45, ha="right",
+    )
+    ax.tick_params(axis="y", labelsize=8, colors=TEXT_PRIMARY)
+    ax.set_ylabel("Indexed (start = 100)", fontsize=8, color=TEXT_SECONDARY,
+                  fontfamily="serif")
+    ax.legend(fontsize=8, frameon=False, labelcolor=TEXT_PRIMARY)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.spines[["left", "bottom"]].set_color(TEXT_SECONDARY)
+    ax.set_facecolor(BG_CHART)
+    fig.patch.set_facecolor(BG_CHART)
+    return _save_fig(fig, "history_line")
+
+
 def generate_charts(positions: list[dict], summary: dict,
                     benchmarks: list[dict]) -> dict[str, str]:
     if not CHARTS_AVAILABLE:
@@ -443,6 +519,10 @@ def generate_charts(positions: list[dict], summary: dict,
         return {}
 
     charts: dict[str, str] = {}
+
+    history_path = generate_history_chart()
+    if history_path:
+        charts["history_line"] = history_path
     total = summary["total_value_eur"]
 
     # 1. Portfolio allocation — group positions <2% into Others
@@ -818,7 +898,7 @@ def fetch_general_news() -> list[dict]:
 
 
 # ── Claude analysis ───────────────────────────────────────────────────────────
-def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics) -> str:
+def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None) -> str:
     positions_text = "\n".join(
         f"- {p['name']} ({p['ticker']}): {p['shares']:.4g} shares | "
         f"current €{p['price_eur']:.2f} | "
@@ -865,10 +945,31 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         f"{metrics_text}\n\n"
         f"PORTFOLIO NEWS\n{port_news_text}\n\n"
         f"GENERAL NEWS\n{gen_news_text}"
+        + _build_conviction_context(conviction, positions)
     )
 
 
-def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics) -> str:
+def _build_conviction_context(conviction: dict | None, positions: list[dict]) -> str:
+    if not conviction:
+        return ""
+    price_map = {p["ticker"]: p["price_eur"] for p in positions}
+    lines = []
+    for ticker, rec in conviction.items():
+        price_at = rec.get("price_eur", 0.0)
+        current = price_map.get(ticker)
+        if current and price_at:
+            chg = (current - price_at) / price_at * 100
+            chg_str = f"{chg:+.1f}% since recommendation"
+        else:
+            chg_str = "no longer in portfolio"
+        lines.append(
+            f"- {ticker}: {rec['action']} (Report #{rec['report']}, {rec['date']}, "
+            f"€{price_at:.2f} at time) — {chg_str}"
+        )
+    return "\n\nPRIOR RECOMMENDATIONS\n" + "\n".join(lines)
+
+
+def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None) -> str:
     """Return Claude's analysis as markdown (sections 1-4)."""
     client = anthropic.Anthropic()
 
@@ -891,10 +992,11 @@ def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics) ->
         "numbers — just the [ACTION] prefix. Example:\n"
         "[TRIM] Reduce NVDA concentration — At 22% of portfolio, HHI is elevated; "
         "trimming to 15% would still capture upside while diversifying tail risk.\n\n"
-        "Use **bold** sparingly for headline figures. Be direct and concise. No disclaimers."
+        "Use **bold** sparingly for headline figures. Be direct and concise. No disclaimers.\n\n"
+        "FORMATTING RULES: Never use Markdown table syntax (pipe characters and dashes). Never use bullet points (- or *) — use plain paragraphs. When presenting benchmark comparisons or tabular data, write it as flowing prose sentences. Example: 'The S&P 500 returned +8.35% YTD, Nasdaq +11.42%, and MSCI World +8.48% — all well below this portfolio\\'s +23.07%.' Do not use any HTML tags. All output must be plain text with Markdown bold (**text**) only."
     )
 
-    user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics)
+    user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction)
 
     log.info("Calling Claude API for analysis (model: %s)…", CLAUDE_MODEL)
     response = client.messages.create(
@@ -1012,6 +1114,61 @@ def parse_actionable(text: str) -> list[dict]:
     if current:
         items.append(current)
     return items[:5]
+
+
+# ── Conviction tracking ───────────────────────────────────────────────────────
+
+_CONVICTION_PATH = Path("conviction.json")
+
+
+def get_history_ytd(current_value: float) -> float | None:
+    """Real YTD % from history.csv if a January data point exists for the current year."""
+    if not _HISTORY_PATH.exists():
+        return None
+    current_year = date.today().year
+    with open(_HISTORY_PATH, newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    jan_rows = [r for r in rows if r.get("date", "").startswith(f"{current_year}-01")]
+    if not jan_rows:
+        return None
+    jan_value = float(jan_rows[0]["total_value_eur"])
+    return (current_value - jan_value) / jan_value * 100 if jan_value else None
+
+
+def load_conviction() -> dict:
+    """Load persisted per-ticker recommendations from conviction.json."""
+    if _CONVICTION_PATH.exists():
+        try:
+            return json.loads(_CONVICTION_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def save_conviction(
+    conviction: dict,
+    actionable_items: list[dict],
+    positions: list[dict],
+    issue_num: int,
+) -> None:
+    """Update conviction.json with any tickers mentioned in this run's actions."""
+    tickers = {p["ticker"] for p in positions}
+    price_map = {p["ticker"]: p["price_eur"] for p in positions}
+    today = date.today().isoformat()
+    for item in actionable_items:
+        title = item.get("title", "")
+        matched = next(
+            (t for t in tickers if re.search(r"\b" + re.escape(t) + r"\b", title, re.IGNORECASE)),
+            None,
+        )
+        if matched:
+            conviction[matched] = {
+                "action": item["action"],
+                "report": issue_num,
+                "date": today,
+                "price_eur": price_map.get(matched, 0.0),
+            }
+    _CONVICTION_PATH.write_text(json.dumps(conviction, indent=2), encoding="utf-8")
 
 
 # ── Metric interpretations ────────────────────────────────────────────────────
@@ -1261,6 +1418,10 @@ def build_html_email(
     denom = 100.0 + fortnight_pct
     fortnight_pl = total * fortnight_pct / denom if denom else 0.0
     fortnight_color = _color(fortnight_pl)
+    weekly_pct   = summary["weekly_pct"]
+    weekly_color = _color(weekly_pct)
+    ytd_pct      = summary["ytd_pct"]
+    ytd_color    = _color(ytd_pct)
 
     # ── Headline ──────────────────────────────────────────────────────────────
     headline_html = _emphasize_numbers(headline)
@@ -1359,6 +1520,7 @@ def build_html_email(
 
     # ── By the Numbers (charts) ───────────────────────────────────────────────
     fig_order = [
+        ("history_line",  "Portfolio vs S&P 500 (Indexed)"),
         ("portfolio_pie", "Portfolio Allocation"),
         ("sector_pie",    "Sector Allocation"),
         ("geo_pie",       "Geographic Allocation"),
@@ -1509,6 +1671,22 @@ def build_html_email(
       <div style="font-family:Georgia,serif;font-size:32px;color:{fortnight_color};font-variant-numeric:tabular-nums">€{fortnight_pl:+,.0f} <span style="font-size:18px;color:{TEXT_SECONDARY}">({fortnight_pct:+.2f}%)</span></div>
     </td>
   </tr></table>
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;border-top:1px solid rgba(255,255,255,0.15)">
+    <tr>
+      <td style="padding-top:16px;width:33%;vertical-align:top">
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:9px;text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};margin-bottom:6px">Weekly</div>
+        <div style="font-family:Georgia,serif;font-size:20px;color:{weekly_color};font-variant-numeric:tabular-nums">{weekly_pct:+.2f}%</div>
+      </td>
+      <td style="padding-top:16px;width:33%;vertical-align:top">
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:9px;text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};margin-bottom:6px">Fortnight</div>
+        <div style="font-family:Georgia,serif;font-size:20px;color:{fortnight_color};font-variant-numeric:tabular-nums">{fortnight_pct:+.2f}%</div>
+      </td>
+      <td style="padding-top:16px;width:33%;vertical-align:top">
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:9px;text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};margin-bottom:6px">YTD</div>
+        <div style="font-family:Georgia,serif;font-size:20px;color:{ytd_color};font-variant-numeric:tabular-nums">{ytd_pct:+.2f}%</div>
+      </td>
+    </tr>
+  </table>
 </td></tr>
 </table>
 
@@ -1651,7 +1829,30 @@ def main() -> None:
         action="store_true",
         help="Build HTML and write to preview.html instead of sending email",
     )
+    parser.add_argument(
+        "--data-only",
+        action="store_true",
+        help="Fetch prices and append to history.csv only — no Claude, no email",
+    )
     args = parser.parse_args()
+
+    if args.data_only:
+        log.info("=== Portfolio Agent (data-only) ===")
+        try:
+            rows = load_portfolio("portfolio.csv")
+            fx_rates = get_fx_rates()
+            _, summary = fetch_portfolio_data(rows, fx_rates)
+            try:
+                sp500 = yf.Ticker("^GSPC").history(period="2d")["Close"]
+                _hist_cache["^GSPC"] = sp500
+            except Exception:
+                pass
+            append_history(summary, issue_number())
+            log.info("History updated — total value EUR %.0f", summary["total_value_eur"])
+        except Exception as exc:
+            log.error("Data-only run failed: %s", exc)
+            sys.exit(1)
+        return
 
     if not args.force and not is_second_saturday():
         msg = (
@@ -1693,6 +1894,11 @@ def main() -> None:
         positions, summary = fetch_portfolio_data(rows, fx_rates)
         positions.sort(key=lambda p: p["value_eur"], reverse=True)
 
+        real_ytd = get_history_ytd(summary["total_value_eur"])
+        if real_ytd is not None:
+            log.info("Using real YTD from history.csv: %+.2f%%", real_ytd)
+            summary["ytd_pct"] = real_ytd
+
         if not positions:
             log.error("No position data could be fetched. Aborting.")
             sys.exit(1)
@@ -1709,13 +1915,17 @@ def main() -> None:
         log.info("Computing advanced metrics…")
         metrics = compute_advanced_metrics(positions, fx_rates)
 
+        if not args.force:
+            append_history(summary, issue_number())
         log.info("Generating charts…")
         charts = generate_charts(positions, summary, benchmarks)
 
         log.info("Calling Claude for analysis…")
-        analysis_raw = call_claude(positions, summary, benchmarks, port_news, gen_news, metrics)
+        conviction = load_conviction()
+        analysis_raw = call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction)
         analysis_body, actionable_raw = split_analysis(analysis_raw)
         actionable_items = parse_actionable(actionable_raw)
+        save_conviction(conviction, actionable_items, positions, issue_number())
 
         log.info("Calling Claude for headline…")
         try:
