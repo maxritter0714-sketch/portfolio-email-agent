@@ -4,7 +4,7 @@ Sends you a polished HTML portfolio report every **second Saturday of the month*
 The report includes live prices, P&L, benchmark comparison, curated news, and a four-section AI analysis from Claude.
 
 > **Heads up:** This project was built for personal use and may require some adaptation before it works out of the box for you. In particular:
-> - The **ISIN → ticker map** in `import_portfolio.py` covers the author's holdings — you may need to add entries for your own positions
+> - **ISIN → ticker overrides** live in `isin_map.json` (gitignored, not included). Copy `isin_map.json.example` to get started — most ISINs are resolved automatically via OpenFIGI
 > - The **sector and region classification** in `agent.py` is resolved dynamically from yfinance — no hardcoded maps to maintain
 > - The **Finanzfluss import script** expects column names from a Finanzfluss export — other brokers will need column name adjustments
 > - The agent is built around **EUR as base currency**
@@ -190,10 +190,17 @@ If you track your portfolio in [Finanzfluss](https://finanzfluss.de), you can us
 python import_portfolio.py --input finanzfluss_export.csv
 ```
 
-The script maps ISINs to Yahoo Finance tickers and writes `portfolio.csv`.
-If any ISINs can't be resolved automatically, it will warn you — add them manually to `ISIN_TO_TICKER` in `import_portfolio.py`.
+The script resolves ISINs to Yahoo Finance tickers via OpenFIGI and writes `portfolio.csv`.
 
-> **Note:** `finanzfluss_export.csv` is in `.gitignore` — your holdings stay private.
+If any ISINs can't be resolved, or if OpenFIGI picks the wrong exchange listing for an ETF, add an override to `isin_map.json`:
+
+```bash
+cp isin_map.json.example isin_map.json
+# then edit isin_map.json and add your ISINs
+```
+
+> **Note:** `finanzfluss_export.csv` and `isin_map.json` are in `.gitignore` — your holdings stay private.
+
 
 
 
