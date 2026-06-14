@@ -91,75 +91,53 @@ if CHARTS_AVAILABLE:
         "axes.titlesize":   12,
     })
 
-# ── Sector / region classification ────────────────────────────────────────────
-TICKER_SECTOR: dict[str, str] = {
-    # Technology
-    "NVDA": "Technology", "MSFT": "Technology", "ADBE": "Technology",
-    "AMD": "Technology", "ANET": "Technology", "APP": "Technology",
-    "APH": "Technology", "CRWD": "Technology", "CRWV": "Technology",
-    "NET": "Technology", "PANW": "Technology", "NOW": "Technology",
-    "MPWR": "Technology", "NBIS": "Technology", "ZETA": "Technology",
-    "VRT": "Technology", "RBRK": "Technology", "ELG.DE": "Technology",
-    "SMHN.DE": "Technology", "TSM": "Technology", "TOST": "Technology",
-    "COIN": "Technology", "PLTR": "Technology", "SOFI": "Technology",
-    # Communication Services
-    "GOOGL": "Comm. Services", "META": "Comm. Services", "BIDU": "Comm. Services",
-    # Consumer Discretionary
-    "AMZN": "Consumer Disc.", "TSLA": "Consumer Disc.", "BKNG": "Consumer Disc.",
-    "MELI": "Consumer Disc.", "BABA": "Consumer Disc.", "XPEV": "Consumer Disc.",
-    "SE": "Consumer Disc.", "GRAB": "Consumer Disc.", "UBER": "Consumer Disc.",
-    "1810.HK": "Consumer Disc.",
-    # Industrials
-    "CAT": "Industrials", "GEV": "Industrials", "RKLB": "Industrials",
-    "BWXT": "Industrials", "3750.HK": "Industrials",
-    # Financials
-    "V": "Financials", "NU": "Financials",
-    # Healthcare
-    "LLY": "Healthcare", "GALD.SW": "Healthcare",
-    # Energy
-    "CEG": "Energy", "NXE": "Energy", "IREN": "Energy", "FLNC": "Energy",
-    # ETFs
-    "SXR8.DE": "ETF – Global", "XNAS.L": "ETF – Nasdaq",
-    "IMAE.AS": "ETF – Europe", "HEMA.L": "ETF – Em. Markets",
-    "STQ.PA": "ETF – Europe", "CD9.PA": "ETF – Europe",
-    "540J.DE": "ETF – Europe", "LCJP.L": "ETF – Japan",
-    "JEDI.L": "ETF – Thematic",
+# ── Ticker classification ──────────────────────────────────────────────────────
+# Sector and region are resolved dynamically from yfinance .info at runtime.
+# _ETF_OVERRIDES covers ETFs where yfinance returns unreliable data.
+_ETF_OVERRIDES: dict[str, tuple[str, str]] = {
+    "SXR8.DE":  ("ETF", "North America"),
+    "XNAS.L":   ("ETF", "North America"),
+    "IMAE.AS":  ("ETF", "Europe"),
+    "HEMA.L":   ("ETF", "Emerging Markets"),
+    "STQ.PA":   ("ETF", "Europe"),
+    "CD9.PA":   ("ETF", "Europe"),
+    "540J.DE":  ("ETF", "Europe"),
+    "LCJP.L":   ("ETF", "Japan"),
+    "JEDI.L":   ("ETF", "Global"),
 }
 
-TICKER_REGION: dict[str, str] = {
-    # United States
-    "NVDA": "United States", "MSFT": "United States", "ADBE": "United States",
-    "AMD": "United States", "ANET": "United States", "APP": "United States",
-    "APH": "United States", "CRWD": "United States", "CRWV": "United States",
-    "NET": "United States", "PANW": "United States", "NOW": "United States",
-    "MPWR": "United States", "NBIS": "United States", "ZETA": "United States",
-    "VRT": "United States", "RBRK": "United States", "TOST": "United States",
-    "COIN": "United States", "PLTR": "United States", "SOFI": "United States",
-    "GOOGL": "United States", "META": "United States", "AMZN": "United States",
-    "TSLA": "United States", "BKNG": "United States", "MELI": "United States",
-    "CAT": "United States", "GEV": "United States", "RKLB": "United States",
-    "BWXT": "United States", "V": "United States", "LLY": "United States",
-    "CEG": "United States", "FLNC": "United States", "UBER": "United States",
-    "NXE": "Canada", "NU": "Brazil",
-    "IREN": "Australia", "SE": "Singapore", "GRAB": "SE Asia",
-    "BABA": "China", "BIDU": "China", "XPEV": "China",
-    "1810.HK": "China", "3750.HK": "China",
-    "ELG.DE": "Germany", "SMHN.DE": "Germany", "GALD.SW": "Switzerland",
-    "SXR8.DE": "Global (USA)", "XNAS.L": "Global (USA)",
-    "IMAE.AS": "Europe", "HEMA.L": "Emerging Markets",
-    "STQ.PA": "Europe", "CD9.PA": "Europe",
-    "540J.DE": "Europe", "LCJP.L": "Japan",
-    "JEDI.L": "Global",
-}
-
-_REGION_BUCKET = {
+_REGION_BUCKET: dict[str, str] = {
     "Germany": "Europe", "France": "Europe", "Switzerland": "Europe",
-    "Italy": "Europe", "UK": "Europe", "Netherlands": "Europe",
-    "Denmark": "Europe", "Norway": "Europe", "Europe": "Europe",
+    "Italy": "Europe", "United Kingdom": "Europe", "UK": "Europe",
+    "Netherlands": "Europe", "Denmark": "Europe", "Norway": "Europe",
+    "Sweden": "Europe", "Spain": "Europe", "Belgium": "Europe",
+    "Finland": "Europe", "Ireland": "Europe", "Austria": "Europe",
+    "Portugal": "Europe", "Europe": "Europe",
+    "United States": "North America", "Canada": "North America",
+    "Japan": "Japan",
     "China": "China / HK", "Hong Kong": "China / HK",
-    "Japan": "Japan", "Emerging Markets": "Emerging Markets",
-    "Global (USA)": "Global ETF", "Global": "Global ETF",
+    "Taiwan": "Asia Pacific", "South Korea": "Asia Pacific",
+    "Singapore": "Asia Pacific", "Australia": "Asia Pacific",
+    "India": "Emerging Markets", "Emerging Markets": "Emerging Markets",
+    "Brazil": "Latin America", "Uruguay": "Latin America",
+    "Mexico": "Latin America", "Argentina": "Latin America",
+    "Israel": "Middle East",
+    "Cayman Islands": "Other", "Marshall Islands": "Other",
+    "Global (USA)": "North America", "Global": "Global",
 }
+
+
+def get_ticker_classification(symbol: str, info: dict) -> tuple[str, str]:
+    """Return (sector, region) from yfinance info, with ETF overrides."""
+    if symbol in _ETF_OVERRIDES:
+        return _ETF_OVERRIDES[symbol]
+    quote_type = info.get("quoteType", "")
+    if quote_type == "ETF":
+        country = info.get("country") or ""
+        return "ETF", _REGION_BUCKET.get(country, "Global")
+    sector = info.get("sector") or "Other"
+    country = info.get("country") or "Other"
+    return sector, _REGION_BUCKET.get(country, country)
 
 
 # ── Date helpers ──────────────────────────────────────────────────────────────
@@ -272,7 +250,12 @@ def get_price_changes(symbol: str) -> tuple[float, float, float, float, str]:
     else:
         ytd_pct = 0.0
 
-    return current, weekly_pct, monthly_pct, ytd_pct, currency
+    try:
+        info = ticker.info
+    except Exception:
+        info = {}
+
+    return current, weekly_pct, monthly_pct, ytd_pct, currency, info
 
 
 def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[list[dict], dict]:
@@ -288,7 +271,7 @@ def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[
         avg_buy_eur = float(row["avg_buy_price"])
 
         try:
-            price_native, weekly, monthly, ytd, currency = get_price_changes(symbol)
+            price_native, weekly, monthly, ytd, currency, info = get_price_changes(symbol)
         except Exception as exc:
             log.error("Skipping %s – could not fetch data: %s", symbol, exc)
             continue
@@ -300,6 +283,7 @@ def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[
         pl_eur = value_eur - cost_eur
         pl_pct = pl_eur / cost_eur * 100 if cost_eur else 0.0
 
+        sector, region = get_ticker_classification(symbol, info)
         positions.append(
             dict(
                 ticker=symbol, name=name, shares=shares,
@@ -307,6 +291,7 @@ def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[
                 price_eur=price_eur, value_eur=value_eur, cost_eur=cost_eur,
                 pl_eur=pl_eur, pl_pct=pl_pct,
                 weekly_pct=weekly, monthly_pct=monthly, ytd_pct=ytd,
+                sector=sector, region=region,
             )
         )
 
@@ -337,7 +322,7 @@ def fetch_benchmarks() -> list[dict]:
     results = []
     for symbol, label in BENCHMARKS:
         try:
-            _, weekly, monthly, ytd, _cur = get_price_changes(symbol)
+            _, weekly, monthly, ytd, _cur, _info = get_price_changes(symbol)
             results.append(
                 dict(symbol=symbol, name=label, weekly_pct=weekly,
                      monthly_pct=monthly, ytd_pct=ytd)
@@ -427,7 +412,7 @@ def generate_charts(positions: list[dict], summary: dict,
     # 2. Sector allocation — top 8 + Others
     sec: dict[str, float] = {}
     for p in positions:
-        s = TICKER_SECTOR.get(p["ticker"]) or "Other"
+        s = p.get("sector") or "Other"
         sec[s] = sec.get(s, 0) + p["value_eur"]
     labels, sizes = _prepare_pie(list(sec.items()), max_slices=8)
     fig, ax = plt.subplots(figsize=(7, 6.5))
@@ -437,7 +422,7 @@ def generate_charts(positions: list[dict], summary: dict,
     # 3. Geographic allocation — top 8 + Others
     geo: dict[str, float] = {}
     for p in positions:
-        raw = TICKER_REGION.get(p["ticker"]) or "Other"
+        raw = p.get("region") or "Other"
         bucket = _REGION_BUCKET.get(raw, raw)
         geo[bucket] = geo.get(bucket, 0) + p["value_eur"]
     labels, sizes = _prepare_pie(list(geo.items()), max_slices=8)
@@ -1714,4 +1699,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
 
