@@ -24,3 +24,5 @@ venv/
 
 # Claude Code internal
 .claude/
+isin_map.json
+
