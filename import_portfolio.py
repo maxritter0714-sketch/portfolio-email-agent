@@ -251,6 +251,12 @@ def convert(
     Returns (number_of_holdings_written, list_of_warning_strings).
     """
     rows = read_export_csv(input_path)
+    if rows:
+        required_cols = {cfg.col_name, cfg.col_isin, cfg.col_shares, cfg.col_price, cfg.col_type}
+        missing_cols = required_cols - set(rows[0].keys())
+        if missing_cols:
+            print(f"Error: '{input_path}' is missing columns: {', '.join(sorted(missing_cols))}")
+            sys.exit(1)
     if verbose:
         print(f"Read {len(rows)} rows from '{input_path}'.")
 

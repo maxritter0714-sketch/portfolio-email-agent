@@ -8,6 +8,7 @@ each month; bypass with --force for testing.
 
 import argparse
 import csv
+import html
 import logging
 import os
 import re
@@ -56,6 +57,9 @@ BENCHMARKS = [
     ("URTH", "MSCI World"),
 ]
 CLAUDE_MODEL = "claude-sonnet-4-6"
+
+# Populated by get_price_changes; reused by compute_advanced_metrics.
+_hist_cache: dict = {}
 
 # ── Editorial colour palette ──────────────────────────────────────────────────
 BG_CREAM        = "#fafaf7"
@@ -251,7 +255,7 @@ def get_fx_rates() -> dict[str, float]:
     return rates
 
 
-def get_price_changes(symbol: str) -> tuple[float, float, float, float, str]:
+def get_price_changes(symbol: str) -> tuple[float, float, float, float, str, dict, dict]:
     ticker = yf.Ticker(symbol)
     hist = ticker.history(period="1y")
     if hist.empty:
@@ -295,6 +299,7 @@ def get_price_changes(symbol: str) -> tuple[float, float, float, float, str]:
         except Exception:
             pass
 
+    _hist_cache[symbol] = hist["Close"]
     return current, weekly_pct, monthly_pct, ytd_pct, currency, info, sector_weights
 
 
@@ -469,9 +474,8 @@ def generate_charts(positions: list[dict], summary: dict,
     # 3. Geographic allocation — top 8 + Others
     geo: dict[str, float] = {}
     for p in positions:
-        raw = p.get("region") or "Other"
-        bucket = _REGION_BUCKET.get(raw, raw)
-        geo[bucket] = geo.get(bucket, 0) + p["value_eur"]
+        region = p.get("region") or "Other"
+        geo[region] = geo.get(region, 0) + p["value_eur"]
     labels, sizes = _prepare_pie(list(geo.items()), max_slices=8)
     fig, ax = plt.subplots(figsize=(7, 6.5))
     _pie(ax, sizes, labels)
@@ -527,13 +531,16 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
         return {}
 
     ret_df: dict[str, object] = {}
+    weights_map: dict[str, float] = {}
     for p in positions:
-        weight = p["value_eur"] / total_val
         try:
-            hist = yf.Ticker(p["ticker"]).history(period="1y")["Close"]
-            if hist.empty or len(hist) < 60:
+            hist_close = _hist_cache.get(p["ticker"])
+            if hist_close is None:
+                hist_close = yf.Ticker(p["ticker"]).history(period="1y")["Close"]
+            if hist_close.empty or len(hist_close) < 60:
                 continue
-            ret_df[p["ticker"]] = hist.pct_change().dropna() * weight
+            ret_df[p["ticker"]] = hist_close.pct_change().dropna()
+            weights_map[p["ticker"]] = p["value_eur"] / total_val
         except Exception:
             continue
 
@@ -542,15 +549,22 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
         return {}
 
     df = pd.DataFrame(ret_df)
-    port_ret_series = df.sum(axis=1, min_count=1).dropna()
+    w = pd.Series(weights_map).reindex(df.columns).fillna(0)
+    # Renormalise weights per day: tickers absent (holiday/NaN) are excluded
+    # so the portfolio return is not understated.
+    active_w = df.notna().mul(w, axis=1)
+    day_w_sum = active_w.sum(axis=1).replace(0, np.nan)
+    port_ret_series = df.fillna(0).mul(active_w).sum(axis=1).div(day_w_sum)
+    port_ret_series = port_ret_series.dropna()
 
     if len(port_ret_series) < 60:
         log.warning("Not enough history for metrics")
         return {}
 
     try:
-        sp500_hist = yf.Ticker("^GSPC").history(period="1y")["Close"]
-        sp500_ret = sp500_hist.pct_change().dropna()
+        _cached = _hist_cache.get("^GSPC")
+        sp500_close = _cached if _cached is not None else yf.Ticker("^GSPC").history(period="1y")["Close"]
+        sp500_ret = sp500_close.pct_change().dropna()
     except Exception as exc:
         log.error("Failed to fetch S&P 500 for metrics: %s", exc)
         return {}
@@ -584,7 +598,6 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
     var_95 = float(np.percentile(pr, 5))
     correlation = float(np.corrcoef(pr, sr)[0, 1])
 
-    total_val = sum(p["value_eur"] for p in positions)
     hhi = sum((p["value_eur"] / total_val) ** 2 for p in positions) if total_val else 0.0
     win_rate = sum(1 for p in positions if p["pl_pct"] > 0) / len(positions) * 100
 
@@ -665,6 +678,9 @@ def fetch_portfolio_news(positions: list[dict]) -> list[dict]:
         parts.append(token)
         used += joiner_len + len(token)
 
+    if not parts:
+        log.warning("No usable position names for portfolio news query -- skipping")
+        return []
     name_clause = " OR ".join(parts)
     query = f"({name_clause}){suffix}"
 
@@ -1322,9 +1338,9 @@ def build_html_email(
             f'<tr>'
             f'<td style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
             f'font-family:Georgia,serif;font-size:14px">'
-            f'{p["name"]}'
+            f'{html.escape(p["name"])}'
             f' <span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
-            f'color:{TEXT_SECONDARY};letter-spacing:1px;margin-left:6px">{p["ticker"]}</span>'
+            f'color:{TEXT_SECONDARY};letter-spacing:1px;margin-left:6px">{html.escape(p["ticker"])}</span>'
             f'</td>'
             f'<td style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
             f'font-family:Arial,Helvetica,sans-serif;font-size:13px;text-align:right;'
@@ -1377,13 +1393,13 @@ def build_html_email(
             f'<div style="font-family:Georgia,serif;font-size:20px;color:{GOLD}">{i:02d}</div>'
             f'</td>'
             f'<td style="vertical-align:top;padding:0 0 16px">'
-            f'<a href="{a["url"]}" style="text-decoration:none;color:{TEXT_PRIMARY}">'
+            f'<a href="{html.escape(a["url"])}" style="text-decoration:none;color:{TEXT_PRIMARY}">'
             f'<div style="font-family:Georgia,serif;font-size:15px;line-height:1.45;'
-            f'margin-bottom:8px">{a["headline"]}</div>'
+            f'margin-bottom:8px">{html.escape(a["headline"])}</div>'
             f'</a>'
             f'<div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
             f'color:{TEXT_SECONDARY};text-transform:uppercase;letter-spacing:1.5px">'
-            f'{a["source"]} &middot; {a["date"]}{tickers_html}'
+            f'{html.escape(a["source"])} &middot; {html.escape(a["date"])}{tickers_html}'
             f'</div>'
             f'</td>'
             f'</tr>'
@@ -1411,13 +1427,13 @@ def build_html_email(
             f'{cat}</div>'
             f'</td>'
             f'<td style="vertical-align:top;padding:0 0 18px">'
-            f'<a href="{a["url"]}" style="text-decoration:none;color:{TEXT_PRIMARY}">'
+            f'<a href="{html.escape(a["url"])}" style="text-decoration:none;color:{TEXT_PRIMARY}">'
             f'<div style="font-family:Georgia,serif;font-size:15px;line-height:1.45;'
-            f'margin-bottom:8px">{a["headline"]}</div>'
+            f'margin-bottom:8px">{html.escape(a["headline"])}</div>'
             f'</a>'
             f'<div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
             f'color:{TEXT_SECONDARY};text-transform:uppercase;letter-spacing:1.5px">'
-            f'{a["source"]} &middot; {a["date"]}'
+            f'{html.escape(a["source"])} &middot; {html.escape(a["date"])}'
             f'</div>'
             f'</td>'
             f'</tr>'
@@ -1653,15 +1669,15 @@ def main() -> None:
         if os.path.exists(ff_export):
             log.info("Found '%s' — refreshing portfolio.csv via import_finanzfluss…", ff_export)
             try:
-                import import_finanzfluss
-                count, warnings = import_finanzfluss.convert(
+                import import_portfolio as _import_mod
+                count, import_warnings = _import_mod.convert(
                     input_path=ff_export,
                     output_path="portfolio.csv",
                     verbose=False,
                 )
-                log.info("import_finanzfluss: wrote %d holdings to portfolio.csv", count)
-                for w in warnings:
-                    log.warning("import_finanzfluss: %s", w)
+                log.info("import_portfolio: wrote %d holdings to portfolio.csv", count)
+                for iw in import_warnings:
+                    log.warning("import_portfolio: %s", iw)
             except Exception as exc:
                 log.error(
                     "import_finanzfluss failed (%s) — falling back to existing portfolio.csv",
