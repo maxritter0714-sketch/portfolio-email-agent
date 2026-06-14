@@ -103,6 +103,21 @@ You should receive an email within about 30 seconds. Check `agent.log` if someth
 
 ## 6 — Schedule it
 
+### GitHub Actions (recommended)
+
+The cleanest setup — runs in the cloud, no local machine required, secrets stored encrypted.
+
+1. Create a private GitHub repo (e.g. `portfolio-agent-data`) and upload your `finanzfluss_export.csv`, `history.csv`, and `conviction.json` there
+2. Create a fine-grained Personal Access Token scoped to that private repo with **Contents: Read and write**
+3. Add secrets to your public repo under **Settings → Secrets and variables → Actions**:
+   - `DATA_REPO_TOKEN` — the PAT from step 2
+   - `ANTHROPIC_API_KEY`, `NEWS_API_KEY`, `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `RECIPIENT_EMAIL`
+4. The included `.github/workflows/report.yml` runs every Saturday at 6am UTC automatically
+
+The workflow collects a weekly data point on every Saturday and sends the full email report on second Saturdays only. `history.csv` and `conviction.json` are pushed back to the private repo after each run so they persist between executions.
+
+To trigger a test run: **Actions → Portfolio Report → Run workflow → tick Force full report**.
+
 ### Mac / Linux (cron)
 
 Open your crontab:
@@ -119,18 +134,11 @@ Add this line to run at 08:00 on every Saturday (the script self-checks for the 
 
 Replace `/path/to/portfolioAgent` with the full path to this directory and `/usr/bin/python3` with the output of `which python3`.
 
-### Windows (Task Scheduler)
+For weekly data collection without sending an email:
 
-1. Open **Task Scheduler** → **Create Basic Task**
-2. Name: `Portfolio Email Agent`
-3. Trigger: **Weekly** → check **Saturday**, set time `08:00`
-4. Action: **Start a program**
-   - Program: `C:\path\to\python.exe`
-   - Arguments: `agent.py`
-   - Start in: `C:\path\to\portfolioAgent`
-5. Click **Finish**
-
-The script will run every Saturday at 08:00 but only send the email on the second Saturday.
+```cron
+0 8 * * 6 cd /path/to/portfolioAgent && /usr/bin/python3 agent.py --data-only >> agent.log 2>&1
+```
 
 ---
 
