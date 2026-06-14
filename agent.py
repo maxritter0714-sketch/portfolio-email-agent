@@ -92,19 +92,39 @@ if CHARTS_AVAILABLE:
     })
 
 # ── Ticker classification ──────────────────────────────────────────────────────
-# Sector and region are resolved dynamically from yfinance .info at runtime.
-# _ETF_OVERRIDES covers ETFs where yfinance returns unreliable data.
-_ETF_OVERRIDES: dict[str, tuple[str, str]] = {
-    "SXR8.DE":  ("ETF", "North America"),
-    "XNAS.L":   ("ETF", "North America"),
-    "IMAE.AS":  ("ETF", "Europe"),
-    "HEMA.L":   ("ETF", "Emerging Markets"),
-    "STQ.PA":   ("ETF", "Europe"),
-    "CD9.PA":   ("ETF", "Europe"),
-    "540J.DE":  ("ETF", "Europe"),
-    "LCJP.L":   ("ETF", "Japan"),
-    "JEDI.L":   ("ETF", "Global"),
+# Normalises ETF sector_weightings keys (snake_case) to match stock sector
+# labels returned by info["sector"] (Title Case).
+_ETF_SECTOR_MAP: dict[str, str] = {
+    "technology":             "Technology",
+    "healthcare":             "Healthcare",
+    "financial_services":     "Financial Services",
+    "consumer_cyclical":      "Consumer Cyclical",
+    "consumer_defensive":     "Consumer Defensive",
+    "communication_services": "Communication Services",
+    "industrials":            "Industrials",
+    "energy":                 "Energy",
+    "utilities":              "Utilities",
+    "basic_materials":        "Basic Materials",
+    "realestate":             "Real Estate",
 }
+
+# Keyword → region mapping for ETF longName classification.
+# Checked in order — first match wins.
+_ETF_REGION_KEYWORDS: list[tuple[str, str]] = [
+    ("S&P 500",          "North America"),
+    ("NASDAQ",           "North America"),
+    ("Nasdaq",           "North America"),
+    ("North America",    "North America"),
+    ("Europe",           "Europe"),
+    ("Swiss",            "Europe"),
+    ("Japan",            "Japan"),
+    ("Emerging Market",  "Emerging Markets"),
+    ("China A",          "China / HK"),
+    ("China",            "China / HK"),
+    ("Asia",             "Asia Pacific"),
+    ("World",            "Global"),
+    ("Global",           "Global"),
+]
 
 _REGION_BUCKET: dict[str, str] = {
     "Germany": "Europe", "France": "Europe", "Switzerland": "Europe",
@@ -123,18 +143,26 @@ _REGION_BUCKET: dict[str, str] = {
     "Mexico": "Latin America", "Argentina": "Latin America",
     "Israel": "Middle East",
     "Cayman Islands": "Other", "Marshall Islands": "Other",
-    "Global (USA)": "North America", "Global": "Global",
+    "Global": "Global",
 }
 
 
 def get_ticker_classification(symbol: str, info: dict) -> tuple[str, str]:
-    """Return (sector, region) from yfinance info, with ETF overrides."""
-    if symbol in _ETF_OVERRIDES:
-        return _ETF_OVERRIDES[symbol]
+    """Return (sector, region) from yfinance info.
+
+    ETF sector is always 'ETF' — actual sector distribution is handled via
+    sector_weights in the position dict. ETF region is derived from longName
+    via keyword matching so no manual overrides are needed.
+    """
     quote_type = info.get("quoteType", "")
     if quote_type == "ETF":
-        country = info.get("country") or ""
-        return "ETF", _REGION_BUCKET.get(country, "Global")
+        long_name = info.get("longName") or symbol
+        region = "Global"
+        for keyword, reg in _ETF_REGION_KEYWORDS:
+            if keyword in long_name:
+                region = reg
+                break
+        return "ETF", region
     sector = info.get("sector") or "Other"
     country = info.get("country") or "Other"
     return sector, _REGION_BUCKET.get(country, country)
@@ -255,7 +283,19 @@ def get_price_changes(symbol: str) -> tuple[float, float, float, float, str]:
     except Exception:
         info = {}
 
-    return current, weekly_pct, monthly_pct, ytd_pct, currency, info
+    sector_weights: dict[str, float] = {}
+    if info.get("quoteType") == "ETF":
+        try:
+            raw = ticker.funds_data.sector_weightings
+            sector_weights = {
+                _ETF_SECTOR_MAP[k]: v
+                for k, v in raw.items()
+                if k in _ETF_SECTOR_MAP and v > 0
+            }
+        except Exception:
+            pass
+
+    return current, weekly_pct, monthly_pct, ytd_pct, currency, info, sector_weights
 
 
 def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[list[dict], dict]:
@@ -271,7 +311,7 @@ def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[
         avg_buy_eur = float(row["avg_buy_price"])
 
         try:
-            price_native, weekly, monthly, ytd, currency, info = get_price_changes(symbol)
+            price_native, weekly, monthly, ytd, currency, info, sector_weights = get_price_changes(symbol)
         except Exception as exc:
             log.error("Skipping %s – could not fetch data: %s", symbol, exc)
             continue
@@ -292,6 +332,7 @@ def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[
                 pl_eur=pl_eur, pl_pct=pl_pct,
                 weekly_pct=weekly, monthly_pct=monthly, ytd_pct=ytd,
                 sector=sector, region=region,
+                sector_weights=sector_weights,
             )
         )
 
@@ -322,7 +363,7 @@ def fetch_benchmarks() -> list[dict]:
     results = []
     for symbol, label in BENCHMARKS:
         try:
-            _, weekly, monthly, ytd, _cur, _info = get_price_changes(symbol)
+            _, weekly, monthly, ytd, _cur, _info, _sw = get_price_changes(symbol)
             results.append(
                 dict(symbol=symbol, name=label, weekly_pct=weekly,
                      monthly_pct=monthly, ytd_pct=ytd)
@@ -410,10 +451,16 @@ def generate_charts(positions: list[dict], summary: dict,
     charts["portfolio_pie"] = _save_fig(fig, "portfolio_pie")
 
     # 2. Sector allocation — top 8 + Others
+    # ETFs are distributed across their actual underlying sectors via sector_weights.
     sec: dict[str, float] = {}
     for p in positions:
-        s = p.get("sector") or "Other"
-        sec[s] = sec.get(s, 0) + p["value_eur"]
+        weights = p.get("sector_weights")
+        if weights:
+            for sector_name, weight in weights.items():
+                sec[sector_name] = sec.get(sector_name, 0) + p["value_eur"] * weight
+        else:
+            s = p.get("sector") or "Other"
+            sec[s] = sec.get(s, 0) + p["value_eur"]
     labels, sizes = _prepare_pie(list(sec.items()), max_slices=8)
     fig, ax = plt.subplots(figsize=(7, 6.5))
     _pie(ax, sizes, labels)
@@ -1699,6 +1746,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 
