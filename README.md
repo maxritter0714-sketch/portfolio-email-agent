@@ -166,7 +166,7 @@ yfinance ──→ live prices + weekly/monthly/YTD changes (USD→EUR conversio
      │
      ├──→ S&P 500 / Nasdaq / MSCI World benchmark comparison
      │
-NewsAPI ──→ 10 portfolio-relevant articles + 5 general articles
+NewsAPI ──→ 30 articles → Haiku relevance filter (0–2 score) → top 10 relevant + 5 general
      │
      ▼
 Claude (claude-sonnet-4-6)
