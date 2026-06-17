@@ -785,13 +785,67 @@ def fetch_portfolio_news(positions: list[dict]) -> list[dict]:
             )
             article["tickers"] = _tag_article_tickers(article, positions)
             out.append(article)
-            if len(out) >= 10:
-                break
         log.info("Fetched %d portfolio news articles", len(out))
         return out
     except Exception as exc:
         log.error("Failed to fetch portfolio news: %s", exc)
         return []
+
+
+def filter_news_by_relevance(articles: list[dict], positions: list[dict]) -> list[dict]:
+    """Use Claude Haiku to score articles 0-2 and return top 10 by score."""
+    if not articles:
+        return articles
+
+    ticker_name_list = ", ".join(
+        f"{p['ticker']} ({p['name']})" for p in positions
+    )
+    articles_text = "\n".join(
+        f"{i}: {a['headline']} [{a['source']}]"
+        for i, a in enumerate(articles)
+    )
+
+    system_prompt = (
+        "You are a financial news relevance classifier. Your only job is to decide "
+        "whether a news article is relevant to an investor's stock portfolio. "
+        "Return only valid JSON, no preamble, no markdown."
+    )
+    user_prompt = (
+        f"A portfolio investor holds these tickers and company names:\n{ticker_name_list}\n\n"
+        "Rate each of the following news articles for relevance to this portfolio on a scale of 0-2:\n"
+        "- 0 = not relevant (gaming hardware reviews, entertainment, unrelated consumer products)\n"
+        "- 1 = tangentially relevant (sector news, macro context)\n"
+        "- 2 = directly relevant (specific company news, earnings, analyst ratings, "
+        "product launches affecting holdings)\n\n"
+        'Return a JSON array in this exact format:\n'
+        '[{"index": 0, "score": 2, "reason": "Direct AMD earnings news"}, ...]\n\n'
+        f"Articles:\n{articles_text}"
+    )
+
+    try:
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        raw = response.content[0].text.strip()
+        scores = json.loads(raw)
+        scored = sorted(scores, key=lambda x: x["score"], reverse=True)
+        kept_indices = {s["index"] for s in scored if s["score"] >= 1}
+        filtered = [a for i, a in enumerate(articles) if i in kept_indices]
+        filtered.sort(key=lambda a: next(
+            (s["score"] for s in scored if s["index"] == articles.index(a)), 0
+        ), reverse=True)
+        log.info(
+            "Relevance filter: %d → %d articles (dropped %d score-0)",
+            len(articles), len(filtered), len(articles) - len(filtered),
+        )
+        return filtered[:10]
+    except Exception as exc:
+        log.warning("Relevance filter failed, using unfiltered list: %s", exc)
+        return articles[:10]
 
 
 _MACRO_KEYWORDS = [
@@ -1933,6 +1987,8 @@ def main() -> None:
 
         log.info("Fetching portfolio news…")
         port_news = fetch_portfolio_news(positions)
+        log.info("Filtering news by relevance…")
+        port_news = filter_news_by_relevance(port_news, positions)
 
         log.info("Fetching general news…")
         gen_news = fetch_general_news()
