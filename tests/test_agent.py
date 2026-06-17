@@ -22,6 +22,7 @@ from agent import (
     _trailing_beta,
     _trailing_vol,
     compute_momentum_scores,
+    compute_lookthrough_exposure,
 )
 
 
@@ -349,3 +350,66 @@ def test_compute_momentum_scores_quartiles_span_1_to_4_and_sort_descending(monke
     expected_quartiles = {f"T{i}": i // 2 + 1 for i in range(8)}
     for d in result:
         assert d["quartile"] == expected_quartiles[d["ticker"]]
+
+
+# ── compute_lookthrough_exposure ────────────────────────────────────────────
+
+def test_lookthrough_amplified_when_etfs_add_20pct_or_more_to_direct_position():
+    positions = [
+        {"ticker": "ETF", "name": "Some ETF", "value_eur": 1000.0,
+         "holdings_weights": {"NVDA": 0.20}},
+        {"ticker": "NVDA", "name": "Nvidia", "value_eur": 100.0,
+         "holdings_weights": {}},
+    ]
+    result = compute_lookthrough_exposure(positions)
+
+    nvda = next(d for d in result if d["ticker"] == "NVDA")
+    assert nvda["kind"] == "amplified"
+    assert nvda["direct_eur"] == pytest.approx(100.0)
+    assert nvda["effective_eur"] == pytest.approx(300.0)
+    assert nvda["hidden_eur"] == pytest.approx(200.0)
+    # The ETF itself has zero hidden exposure (no look-through into itself)
+    assert all(d["ticker"] != "ETF" for d in result)
+
+def test_lookthrough_excludes_directly_held_position_amplified_under_20pct():
+    positions = [
+        {"ticker": "ETF", "name": "Some ETF", "value_eur": 1000.0,
+         "holdings_weights": {"NVDA": 0.05}},  # adds 50 on top of 1000 direct = 5%
+        {"ticker": "NVDA", "name": "Nvidia", "value_eur": 1000.0,
+         "holdings_weights": {}},
+    ]
+    result = compute_lookthrough_exposure(positions)
+    assert all(d["ticker"] != "NVDA" for d in result)
+
+def test_lookthrough_hidden_kind_for_ticker_not_held_directly():
+    positions = [
+        {"ticker": "ETF", "name": "Some ETF", "value_eur": 1000.0,
+         "holdings_weights": {"MSFT": 0.05}},
+    ]
+    result = compute_lookthrough_exposure(positions)
+
+    msft = next(d for d in result if d["ticker"] == "MSFT")
+    assert msft["kind"] == "hidden"
+    assert msft["direct_eur"] == pytest.approx(0.0)
+    assert msft["effective_eur"] == pytest.approx(50.0)
+    assert msft["hidden_eur"] == pytest.approx(50.0)
+
+def test_lookthrough_excludes_hidden_exposure_below_threshold():
+    positions = [
+        {"ticker": "ETF", "name": "Some ETF", "value_eur": 10_000.0,
+         "holdings_weights": {"TINY": 0.002}},  # 0.2% of total, under the 0.3% floor
+    ]
+    result = compute_lookthrough_exposure(positions)
+    assert all(d["ticker"] != "TINY" for d in result)
+
+def test_lookthrough_empty_for_zero_total_value():
+    positions = [{"ticker": "AAA", "name": "Alpha", "value_eur": 0.0, "holdings_weights": {}}]
+    assert compute_lookthrough_exposure(positions) == []
+
+def test_lookthrough_sorted_descending_by_hidden_eur():
+    positions = [
+        {"ticker": "ETF1", "name": "ETF One", "value_eur": 1000.0,
+         "holdings_weights": {"BIG": 0.10, "SMALL": 0.02}},
+    ]
+    result = compute_lookthrough_exposure(positions)
+    assert [d["ticker"] for d in result] == ["BIG", "SMALL"]

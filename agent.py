@@ -257,7 +257,7 @@ def get_fx_rates() -> dict[str, float]:
     return rates
 
 
-def get_price_changes(symbol: str) -> tuple[float, float, float, float, str, dict, dict]:
+def get_price_changes(symbol: str) -> tuple[float, float, float, float, str, dict, dict, dict]:
     ticker = yf.Ticker(symbol)
     hist = ticker.history(period="1y")
     if hist.empty:
@@ -297,6 +297,7 @@ def get_price_changes(symbol: str) -> tuple[float, float, float, float, str, dic
         info = {}
 
     sector_weights: dict[str, float] = {}
+    holdings_weights: dict[str, float] = {}
     if info.get("quoteType") == "ETF":
         try:
             raw = ticker.funds_data.sector_weightings
@@ -307,9 +308,15 @@ def get_price_changes(symbol: str) -> tuple[float, float, float, float, str, dic
             }
         except Exception:
             pass
+        try:
+            top = ticker.funds_data.top_holdings
+            if top is not None and not top.empty:
+                holdings_weights = top["Holding Percent"].to_dict()
+        except Exception:
+            pass
 
     _hist_cache[symbol] = hist["Close"]
-    return current, weekly_pct, monthly_pct, ytd_pct, currency, info, sector_weights
+    return current, weekly_pct, monthly_pct, ytd_pct, currency, info, sector_weights, holdings_weights
 
 
 def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[list[dict], dict]:
@@ -325,7 +332,7 @@ def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[
         avg_buy_eur = float(row["avg_buy_price"])
 
         try:
-            price_native, weekly, monthly, ytd, currency, info, sector_weights = get_price_changes(symbol)
+            price_native, weekly, monthly, ytd, currency, info, sector_weights, holdings_weights = get_price_changes(symbol)
         except Exception as exc:
             log.error("Skipping %s – could not fetch data: %s", symbol, exc)
             continue
@@ -347,6 +354,7 @@ def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[
                 weekly_pct=weekly, monthly_pct=monthly, ytd_pct=ytd,
                 sector=sector, region=region,
                 sector_weights=sector_weights,
+                holdings_weights=holdings_weights,
             )
         )
 
@@ -377,7 +385,7 @@ def fetch_benchmarks() -> list[dict]:
     results = []
     for symbol, label in BENCHMARKS:
         try:
-            _, weekly, monthly, ytd, _cur, _info, _sw = get_price_changes(symbol)
+            _, weekly, monthly, ytd, _cur, _info, _sw, _hw = get_price_changes(symbol)
             results.append(
                 dict(symbol=symbol, name=label, weekly_pct=weekly,
                      monthly_pct=monthly, ytd_pct=ytd)
@@ -779,6 +787,62 @@ def compute_momentum_scores(positions: list[dict]) -> list[dict]:
     return scored
 
 
+def compute_lookthrough_exposure(positions: list[dict]) -> list[dict]:
+    """Effective per-ticker exposure including ETF look-through.
+
+    Returns two kinds of entries, both presented as neutral fact rather
+    than a risk signal — more or hidden exposure to a given name is not
+    inherently good or bad, that depends on the reader's own view of it:
+      - "amplified": a directly-held position whose true effective exposure
+        (direct + embedded in ETFs) is at least 20% higher than the direct
+        position alone shows.
+      - "hidden": a stock not held directly at all, but with non-trivial
+        exposure (>=0.3% of total portfolio value) purely through ETFs.
+
+    ETF `top_holdings` only covers the largest ~10 constituents per fund,
+    so this is a conservative floor on both kinds, not exhaustive.
+    """
+    total_value = sum(p["value_eur"] for p in positions)
+    if not total_value:
+        return []
+
+    direct: dict[str, float] = {}
+    effective: dict[str, float] = {}
+    names: dict[str, str] = {}
+
+    for p in positions:
+        direct[p["ticker"]] = direct.get(p["ticker"], 0.0) + p["value_eur"]
+        effective[p["ticker"]] = effective.get(p["ticker"], 0.0) + p["value_eur"]
+        names[p["ticker"]] = p["name"]
+
+    for p in positions:
+        for constituent, weight in p.get("holdings_weights", {}).items():
+            effective[constituent] = effective.get(constituent, 0.0) + p["value_eur"] * weight
+            names.setdefault(constituent, constituent)
+
+    results = []
+    for ticker, effective_eur in effective.items():
+        direct_eur = direct.get(ticker, 0.0)
+        hidden_eur = effective_eur - direct_eur
+        hidden_pct = hidden_eur / total_value * 100
+        if direct_eur > 0:
+            if hidden_eur / direct_eur < 0.20:
+                continue
+            kind = "amplified"
+        else:
+            if hidden_pct < 0.3:
+                continue
+            kind = "hidden"
+        results.append(dict(
+            ticker=ticker, name=names.get(ticker, ticker), kind=kind,
+            direct_eur=direct_eur, effective_eur=effective_eur,
+            hidden_eur=hidden_eur, hidden_pct=hidden_pct,
+        ))
+
+    results.sort(key=lambda d: d["hidden_eur"], reverse=True)
+    return results
+
+
 # ── News ──────────────────────────────────────────────────────────────────────
 _NAME_STOP = {
     "inc", "inc.", "corp", "corp.", "corporation", "ltd", "ltd.", "plc",
@@ -1045,7 +1109,7 @@ def fetch_general_news() -> list[dict]:
 
 
 # ── Claude analysis ───────────────────────────────────────────────────────────
-def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None) -> str:
+def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None) -> str:
     positions_text = "\n".join(
         f"- {p['name']} ({p['ticker']}): {p['shares']:.4g} shares | "
         f"current €{p['price_eur']:.2f} | "
@@ -1105,6 +1169,38 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         )
         if bottom5:
             momentum_text += "\nBottom:\n" + "\n".join(_fmt_mom(d) for d in bottom5)
+    lookthrough_text = ""
+    if lookthrough:
+        amplified = [d for d in lookthrough if d["kind"] == "amplified"]
+        hidden = [d for d in lookthrough if d["kind"] == "hidden"]
+        lookthrough_text = (
+            f"\n\nLOOK-THROUGH EXPOSURE (factual only, not a risk signal — more or "
+            f"hidden exposure to a name is not inherently good or bad, that depends "
+            f"on the reader's own view of it; ETF top_holdings only covers the "
+            f"largest ~10 constituents per fund, so this is a conservative floor, "
+            f"not exhaustive)\n"
+        )
+        if amplified:
+            lookthrough_text += (
+                "Directly held, true exposure amplified ≥20% by ETFs:\n"
+                + "\n".join(
+                    f"- {d['name']} ({d['ticker']}): direct €{d['direct_eur']:,.0f} | "
+                    f"effective €{d['effective_eur']:,.0f} "
+                    f"(+{d['hidden_eur']/d['direct_eur']*100:.0f}% via ETFs)"
+                    for d in amplified[:6]
+                )
+            )
+        if hidden:
+            if amplified:
+                lookthrough_text += "\n"
+            lookthrough_text += (
+                "Not held directly, meaningful exposure via ETFs only:\n"
+                + "\n".join(
+                    f"- {d['name']} ({d['ticker']}): €{d['effective_eur']:,.0f} "
+                    f"({d['hidden_pct']:.2f}% of portfolio)"
+                    for d in hidden[:6]
+                )
+            )
     return (
         f"PORTFOLIO SUMMARY\n"
         f"Total value: €{summary['total_value_eur']:,.2f} | "
@@ -1114,7 +1210,8 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         f"POSITIONS\n{positions_text}\n\n"
         f"BENCHMARKS\n{bench_text}"
         f"{metrics_text}"
-        f"{momentum_text}\n\n"
+        f"{momentum_text}"
+        f"{lookthrough_text}\n\n"
         f"PORTFOLIO NEWS\n{port_news_text}\n\n"
         f"GENERAL NEWS\n{gen_news_text}"
         + _build_conviction_context(conviction, positions)
@@ -1141,7 +1238,7 @@ def _build_conviction_context(conviction: dict | None, positions: list[dict]) ->
     return "\n\nPRIOR RECOMMENDATIONS\n" + "\n".join(lines)
 
 
-def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None) -> str:
+def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None) -> str:
     """Return Claude's analysis as markdown (sections 1-4)."""
     client = anthropic.Anthropic()
 
@@ -1150,13 +1247,20 @@ def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, co
         "Your tone is editorial, precise, confident — like the Financial Times or The "
         "Economist. You have access to the user's full portfolio data, news, benchmarks, "
         "advanced quant metrics including Sharpe, Beta, Alpha, Sortino, VaR, Max "
-        "Drawdown, rolling 90d Sharpe and 30d/90d Beta, and per-holding multi-timeframe "
-        "momentum scores (quartile-ranked, 4=strongest). Use these metrics to give specific "
-        "analysis. Write a structured report with exactly these four sections:\n\n"
+        "Drawdown, rolling 90d Sharpe and 30d/90d Beta, per-holding multi-timeframe "
+        "momentum scores (quartile-ranked, 4=strongest), and LOOK-THROUGH EXPOSURE data "
+        "showing stocks embedded inside held ETFs beyond any direct position. Use these "
+        "metrics to give specific analysis. Write a structured report with exactly these "
+        "four sections:\n\n"
         "## (1) Portfolio Performance Summary — key numbers, what's up, what's down. Where "
         "the MOMENTUM data shows a holding's 1-month move diverging meaningfully from its "
         "3M/6M/12M trend, or a clear quartile 1 (weakest) or quartile 4 (strongest) holding, "
-        "name it specifically.\n"
+        "name it specifically. Where LOOK-THROUGH EXPOSURE shows a directly-held "
+        "stock's true effective weight is meaningfully higher than its direct position "
+        "alone, or shows non-trivial exposure to a company held only through ETFs, "
+        "mention it as a factual data point — not as a problem to fix. Whether more "
+        "or hidden exposure to a given name is desirable depends on the reader's own "
+        "view of that company, not on the metric itself.\n"
         "## (2) Benchmark Comparison — how the portfolio did vs S&P 500, Nasdaq, and MSCI "
         "World. Reference Alpha and Beta where relevant. Where rolling 90d Sharpe or 30d/90d "
         "Beta diverge meaningfully from the full-period values, note whether risk-adjusted "
@@ -1174,7 +1278,7 @@ def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, co
         "FORMATTING RULES: Never use Markdown table syntax (pipe characters and dashes). Never use bullet points (- or *) — use plain paragraphs. When presenting benchmark comparisons or tabular data, write it as flowing prose sentences. Example: 'The S&P 500 returned +8.35% YTD, Nasdaq +11.42%, and MSCI World +8.48% — all well below this portfolio\\'s +23.07%.' Do not use any HTML tags. All output must be plain text with Markdown bold (**text**) only."
     )
 
-    user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction, momentum)
+    user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction, momentum, lookthrough)
 
     log.info("Calling Claude API for analysis (model: %s)…", CLAUDE_MODEL)
     response = client.messages.create(
@@ -2123,6 +2227,9 @@ def main() -> None:
         log.info("Computing momentum scores…")
         momentum_data = compute_momentum_scores(positions)
 
+        log.info("Computing look-through exposure…")
+        lookthrough_data = compute_lookthrough_exposure(positions)
+
         if not args.force:
             append_history(summary, issue_number())
         log.info("Generating charts…")
@@ -2130,7 +2237,7 @@ def main() -> None:
 
         log.info("Calling Claude for analysis…")
         conviction = load_conviction()
-        analysis_raw = call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction, momentum_data)
+        analysis_raw = call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction, momentum_data, lookthrough_data)
         analysis_body, actionable_raw = split_analysis(analysis_raw)
         actionable_items = parse_actionable(actionable_raw)
         save_conviction(conviction, actionable_items, positions, issue_number())
