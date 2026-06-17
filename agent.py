@@ -263,6 +263,13 @@ def get_price_changes(symbol: str) -> tuple[float, float, float, float, str, dic
     if hist.empty:
         raise ValueError(f"No price history returned for {symbol}")
 
+    # Drop trailing rows with no Close yet — e.g. the exchange's session is
+    # still open or today's bar hasn't been finalized at fetch time — so
+    # "current" never picks up a NaN price.
+    hist = hist[hist["Close"].notna()]
+    if hist.empty:
+        raise ValueError(f"No finalized price history returned for {symbol}")
+
     try:
         currency = ticker.fast_info.currency or "USD"
     except Exception:
