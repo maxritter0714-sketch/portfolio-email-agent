@@ -1,4 +1,5 @@
 ﻿"""Tests for pure functions in agent.py."""
+import numpy as np
 import pytest
 from datetime import date as real_date
 from unittest.mock import patch
@@ -14,6 +15,10 @@ from agent import (
     _markdown_to_html,
     _emphasize_numbers,
     _prepare_pie,
+    _trailing,
+    _trailing_sharpe,
+    _trailing_beta,
+    _trailing_vol,
 )
 
 
@@ -223,3 +228,56 @@ def test_prepare_pie_min_pct_aggregates_small():
     assert "Big" in labels
     assert "Others" in labels
     assert "Small" not in labels
+
+
+# ── _trailing / rolling metrics ─────────────────────────────────────────────
+
+def test_trailing_slices_last_n():
+    arr = np.arange(10, dtype=float)
+    result = _trailing(arr, 3)
+    assert list(result) == [7.0, 8.0, 9.0]
+
+def test_trailing_falls_back_to_full_array_when_shorter():
+    arr = np.arange(5, dtype=float)
+    result = _trailing(arr, 10)
+    assert list(result) == list(arr)
+
+def test_trailing_sharpe_positive_returns_gives_positive_sharpe():
+    pr = np.full(60, 0.01)
+    pr = pr + np.array([0.001 if i % 2 == 0 else -0.001 for i in range(60)])
+    sharpe = _trailing_sharpe(pr, 30, risk_free=0.0, tdays=252)
+    assert sharpe > 0
+
+def test_trailing_sharpe_window_larger_than_array_uses_full_array():
+    pr = np.full(20, 0.01) + np.array([0.001 if i % 2 == 0 else -0.001 for i in range(20)])
+    full = _trailing_sharpe(pr, 90, risk_free=0.0, tdays=252)
+    direct = _trailing_sharpe(pr, len(pr), risk_free=0.0, tdays=252)
+    assert full == pytest.approx(direct)
+
+def test_trailing_beta_equal_series_is_one():
+    pr = np.array([0.01, -0.02, 0.015, -0.005, 0.02, -0.01, 0.012])
+    beta = _trailing_beta(pr, pr, window=5)
+    assert beta == pytest.approx(1.0)
+
+def test_trailing_beta_window_larger_than_array_uses_full_array():
+    pr = np.array([0.01, -0.02, 0.015, -0.005, 0.02])
+    sr = np.array([0.008, -0.018, 0.012, -0.004, 0.018])
+    full = _trailing_beta(pr, sr, window=90)
+    direct = _trailing_beta(pr, sr, window=len(pr))
+    assert full == pytest.approx(direct)
+
+def test_trailing_beta_zero_variance_benchmark_returns_none():
+    pr = np.array([0.01, -0.02, 0.015, -0.005, 0.02])
+    sr = np.full(5, 0.0)
+    assert _trailing_beta(pr, sr, window=5) is None
+
+def test_trailing_vol_matches_manual_calculation():
+    pr = np.array([0.01, -0.02, 0.015, -0.005, 0.02])
+    expected = np.std(pr, ddof=1) * np.sqrt(252)
+    assert _trailing_vol(pr, window=5, tdays=252) == pytest.approx(expected)
+
+def test_trailing_vol_window_larger_than_array_uses_full_array():
+    pr = np.array([0.01, -0.02, 0.015, -0.005, 0.02])
+    full = _trailing_vol(pr, window=90, tdays=252)
+    direct = _trailing_vol(pr, window=len(pr), tdays=252)
+    assert full == pytest.approx(direct)

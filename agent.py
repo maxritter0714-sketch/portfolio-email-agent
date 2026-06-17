@@ -595,6 +595,43 @@ def generate_charts(positions: list[dict], summary: dict,
 
 
 # ── Advanced metrics ──────────────────────────────────────────────────────────
+def _trailing(arr: np.ndarray, window: int) -> np.ndarray:
+    """Last `window` entries, or the full array if shorter.
+
+    Falls back to the full period when history is shorter than the window
+    (e.g. a 75-day-old position asked for a 90d slice) so callers degrade to
+    the same figure already shown elsewhere as the full-period metric,
+    instead of crashing or returning a misleading dummy value.
+    """
+    return arr[-window:] if len(arr) >= window else arr
+
+
+def _trailing_sharpe(pr: np.ndarray, window: int, risk_free: float, tdays: int) -> float:
+    w = _trailing(pr, window)
+    ann_ret = np.mean(w) * tdays
+    ann_vol = np.std(w, ddof=1) * np.sqrt(tdays)
+    return (ann_ret - risk_free) / ann_vol if ann_vol else 0.0
+
+
+def _trailing_beta(pr: np.ndarray, sr: np.ndarray, window: int) -> float | None:
+    """None when the benchmark window has zero variance (degenerate window).
+
+    A fallback of 1.0 ("moves exactly like the market") would be a specific,
+    potentially false claim rather than a neutral default — better to signal
+    "no data" and have the caller omit it than risk Claude commenting on a
+    fabricated stable beta.
+    """
+    wp, wb = _trailing(pr, window), _trailing(sr, window)
+    cov = np.cov(wp, wb)
+    if cov[1, 1] == 0:
+        return None
+    return float(cov[0, 1] / cov[1, 1])
+
+
+def _trailing_vol(pr: np.ndarray, window: int, tdays: int) -> float:
+    return np.std(_trailing(pr, window), ddof=1) * np.sqrt(tdays)
+
+
 def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) -> dict:
     if not CHARTS_AVAILABLE:
         return {}
@@ -676,7 +713,14 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
 
     calmar = ann_ret / abs(max_dd) if max_dd != 0 else 0.0
     var_95 = float(np.percentile(pr, 5))
+    # Full-period (not rolling) Expected Shortfall: mean return in the worst 5% of all-time daily returns.
+    cvar_95 = float(np.mean(pr[pr <= np.percentile(pr, 5)]))
     correlation = float(np.corrcoef(pr, sr)[0, 1])
+
+    sharpe_90d = _trailing_sharpe(pr, 90, RISK_FREE, TDAYS)
+    beta_30d = _trailing_beta(pr, sr, 30)
+    beta_90d = _trailing_beta(pr, sr, 90)
+    vol_30d = _trailing_vol(pr, 30, TDAYS)
 
     hhi = sum((p["value_eur"] / total_val) ** 2 for p in positions) if total_val else 0.0
     win_rate = sum(1 for p in positions if p["pl_pct"] > 0) / len(positions) * 100
@@ -689,6 +733,8 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
         sharpe=sharpe, sortino=sortino, beta=beta, alpha=alpha,
         volatility=ann_vol, max_drawdown=max_dd, calmar=calmar,
         var_95=var_95, correlation=correlation, hhi=hhi, win_rate=win_rate,
+        cvar_95=cvar_95, sharpe_90d=sharpe_90d,
+        beta_30d=beta_30d, beta_90d=beta_90d, vol_30d=vol_30d,
     )
 
 
@@ -980,6 +1026,8 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
     )
     metrics_text = ""
     if metrics:
+        beta_30d_str = f"{metrics['beta_30d']:.2f}" if metrics.get("beta_30d") is not None else "n/a"
+        beta_90d_str = f"{metrics['beta_90d']:.2f}" if metrics.get("beta_90d") is not None else "n/a"
         metrics_text = (
             f"\nADVANCED METRICS\n"
             f"Sharpe Ratio: {metrics.get('sharpe', 0):.2f} | "
@@ -992,7 +1040,11 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
             f"VaR 95% (1-day): {metrics.get('var_95', 0)*100:.2f}%\n"
             f"Correlation to S&P 500: {metrics.get('correlation', 0):.2f} | "
             f"HHI Concentration: {metrics.get('hhi', 0):.4f}\n"
-            f"Win Rate: {metrics.get('win_rate', 0):.1f}%"
+            f"Win Rate: {metrics.get('win_rate', 0):.1f}%\n"
+            f"Rolling Sharpe (90d): {metrics.get('sharpe_90d', 0):.2f} | "
+            f"Rolling Beta (30d/90d): {beta_30d_str} / {beta_90d_str}\n"
+            f"Rolling Volatility (30d, annualized): {metrics.get('vol_30d', 0)*100:.1f}% | "
+            f"CVaR 95% (Expected Shortfall, full 1Y period — not rolling): {metrics.get('cvar_95', 0)*100:.2f}%"
         )
     return (
         f"PORTFOLIO SUMMARY\n"
@@ -1038,11 +1090,13 @@ def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, co
         "Your tone is editorial, precise, confident — like the Financial Times or The "
         "Economist. You have access to the user's full portfolio data, news, benchmarks, "
         "and advanced quant metrics including Sharpe, Beta, Alpha, Sortino, VaR, Max "
-        "Drawdown. Use these metrics to give specific analysis. Write a structured report "
-        "with exactly these four sections:\n\n"
+        "Drawdown, and rolling 90d Sharpe and 30d/90d Beta. Use these metrics to give specific "
+        "analysis. Write a structured report with exactly these four sections:\n\n"
         "## (1) Portfolio Performance Summary — key numbers, what's up, what's down.\n"
         "## (2) Benchmark Comparison — how the portfolio did vs S&P 500, Nasdaq, and MSCI "
-        "World. Reference Alpha and Beta where relevant.\n"
+        "World. Reference Alpha and Beta where relevant. Where rolling 90d Sharpe or 30d/90d "
+        "Beta diverge meaningfully from the full-period values, note whether risk-adjusted "
+        "returns or market sensitivity are improving or deteriorating.\n"
         "## (3) News & Market Context — the 3 most important implications of the news for "
         "this specific portfolio.\n"
         "## (4) Actionable Suggestions — 3 to 5 specific recommendations. Format EACH item "
