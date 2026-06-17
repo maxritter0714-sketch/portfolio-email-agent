@@ -1,9 +1,11 @@
 ﻿"""Tests for pure functions in agent.py."""
 import numpy as np
+import pandas as pd
 import pytest
 from datetime import date as real_date
 from unittest.mock import patch
 
+import agent
 from agent import (
     issue_number,
     is_second_saturday,
@@ -19,6 +21,7 @@ from agent import (
     _trailing_sharpe,
     _trailing_beta,
     _trailing_vol,
+    compute_momentum_scores,
 )
 
 
@@ -281,3 +284,68 @@ def test_trailing_vol_window_larger_than_array_uses_full_array():
     full = _trailing_vol(pr, window=90, tdays=252)
     direct = _trailing_vol(pr, window=len(pr), tdays=252)
     assert full == pytest.approx(direct)
+
+
+# ── compute_momentum_scores ─────────────────────────────────────────────────
+
+def test_compute_momentum_scores_happy_path(monkeypatch):
+    length = 130
+    vals = np.linspace(50, 300, length)
+    vals[0] = 100.0
+    vals[length - 126] = 105.0
+    vals[length - 63] = 150.0
+    vals[length - 21] = 180.0
+    vals[-1] = 200.0
+    monkeypatch.setattr(agent, "_hist_cache", {"AAA": pd.Series(vals)})
+
+    result = compute_momentum_scores([{"ticker": "AAA", "name": "Alpha Co"}])
+
+    assert len(result) == 1
+    d = result[0]
+    assert d["r1m"] == pytest.approx(200 / 180 - 1)
+    assert d["r3m"] == pytest.approx(200 / 150 - 1)
+    assert d["r6m"] == pytest.approx(200 / 105 - 1)
+    assert d["r12m"] == pytest.approx(1.0)
+    expected_score = 0.35 * d["r3m"] + 0.35 * d["r6m"] + 0.30 * d["r12m"]
+    assert d["score"] == pytest.approx(expected_score)
+
+def test_compute_momentum_scores_skips_missing_from_cache(monkeypatch):
+    monkeypatch.setattr(agent, "_hist_cache", {})
+    result = compute_momentum_scores([{"ticker": "ZZZ", "name": "Zeta"}])
+    assert result == []
+
+def test_compute_momentum_scores_skips_short_history(monkeypatch):
+    short_series = pd.Series(np.linspace(100, 110, 50))  # < 63 days
+    monkeypatch.setattr(agent, "_hist_cache", {"AAA": short_series})
+    result = compute_momentum_scores([{"ticker": "AAA", "name": "Alpha"}])
+    assert result == []
+
+def test_compute_momentum_scores_r6m_falls_back_to_r3m_when_under_126_days(monkeypatch):
+    vals = np.linspace(100, 150, 90)  # >= 63, < 126
+    monkeypatch.setattr(agent, "_hist_cache", {"AAA": pd.Series(vals)})
+    result = compute_momentum_scores([{"ticker": "AAA", "name": "Alpha"}])
+    d = result[0]
+    assert d["r6m"] == pytest.approx(d["r3m"])
+
+def test_compute_momentum_scores_quartiles_span_1_to_4_and_sort_descending(monkeypatch):
+    def make_series(growth: float, length: int = 130) -> pd.Series:
+        start, end = 100.0, 100.0 * (1 + growth)
+        vals = np.full(length, start)
+        vals[0] = start
+        vals[length - 126] = end
+        vals[length - 63] = end
+        vals[length - 21] = end
+        vals[-1] = end
+        return pd.Series(vals)
+
+    growths = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    cache = {f"T{i}": make_series(g) for i, g in enumerate(growths)}
+    positions = [{"ticker": f"T{i}", "name": f"Ticker {i}"} for i in range(8)]
+    monkeypatch.setattr(agent, "_hist_cache", cache)
+
+    result = compute_momentum_scores(positions)
+
+    assert [d["ticker"] for d in result] == [f"T{i}" for i in reversed(range(8))]
+    expected_quartiles = {f"T{i}": i // 2 + 1 for i in range(8)}
+    for d in result:
+        assert d["quartile"] == expected_quartiles[d["ticker"]]

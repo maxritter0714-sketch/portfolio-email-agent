@@ -745,6 +745,40 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
     )
 
 
+def compute_momentum_scores(positions: list[dict]) -> list[dict]:
+    """Multi-timeframe momentum score per position, ranked into quartiles.
+
+    r1m is computed and reported but excluded from the score: academic
+    momentum research ("12-2 momentum", Jegadeesh-Titman) deliberately skips
+    the most recent month, since 1-month returns tend to mean-revert rather
+    than continue, unlike 3-12 month returns.
+    """
+    scored: list[dict] = []
+    for p in positions:
+        close = _hist_cache.get(p["ticker"])
+        if close is None or len(close) < 63:
+            continue
+        vals = close.to_numpy(dtype=float)
+        current = vals[-1]
+        r1m = current / vals[-21] - 1
+        r3m = current / vals[-63] - 1
+        r6m = current / vals[-126] - 1 if len(vals) >= 126 else r3m
+        r12m = current / vals[0] - 1
+        score = 0.35 * r3m + 0.35 * r6m + 0.30 * r12m
+        scored.append(dict(
+            ticker=p["ticker"], name=p["name"], score=score,
+            r1m=r1m, r3m=r3m, r6m=r6m, r12m=r12m,
+        ))
+
+    scored.sort(key=lambda d: d["score"])
+    n = len(scored)
+    for i, d in enumerate(scored):
+        d["quartile"] = min(4, i * 4 // n + 1)
+
+    scored.sort(key=lambda d: d["score"], reverse=True)
+    return scored
+
+
 # ── News ──────────────────────────────────────────────────────────────────────
 _NAME_STOP = {
     "inc", "inc.", "corp", "corp.", "corporation", "ltd", "ltd.", "plc",
@@ -1011,7 +1045,7 @@ def fetch_general_news() -> list[dict]:
 
 
 # ── Claude analysis ───────────────────────────────────────────────────────────
-def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None) -> str:
+def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None) -> str:
     positions_text = "\n".join(
         f"- {p['name']} ({p['ticker']}): {p['shares']:.4g} shares | "
         f"current €{p['price_eur']:.2f} | "
@@ -1053,6 +1087,24 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
             f"Rolling Volatility (30d, annualized): {metrics.get('vol_30d', 0)*100:.1f}% | "
             f"CVaR 95% (Expected Shortfall, full 1Y period — not rolling): {metrics.get('cvar_95', 0)*100:.2f}%"
         )
+    momentum_text = ""
+    if momentum:
+        def _fmt_mom(d: dict) -> str:
+            return (
+                f"- {d['name']} ({d['ticker']}): Q{d['quartile']} | "
+                f"1M {d['r1m']*100:+.1f}% 3M {d['r3m']*100:+.1f}% "
+                f"6M {d['r6m']*100:+.1f}% 12M {d['r12m']*100:+.1f}%"
+            )
+        top5 = momentum[:5]
+        bottom5 = momentum[5:][-5:]
+        momentum_text = (
+            f"\n\nMOMENTUM (quartile 4 = strongest, 1 = weakest; score weights "
+            f"3M/6M/12M returns — 1M is shown for context but excluded from "
+            f"the score since short-term moves tend to mean-revert)\n"
+            f"Top:\n" + "\n".join(_fmt_mom(d) for d in top5)
+        )
+        if bottom5:
+            momentum_text += "\nBottom:\n" + "\n".join(_fmt_mom(d) for d in bottom5)
     return (
         f"PORTFOLIO SUMMARY\n"
         f"Total value: €{summary['total_value_eur']:,.2f} | "
@@ -1061,7 +1113,8 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         f"YTD: {summary['ytd_pct']:+.2f}%\n\n"
         f"POSITIONS\n{positions_text}\n\n"
         f"BENCHMARKS\n{bench_text}"
-        f"{metrics_text}\n\n"
+        f"{metrics_text}"
+        f"{momentum_text}\n\n"
         f"PORTFOLIO NEWS\n{port_news_text}\n\n"
         f"GENERAL NEWS\n{gen_news_text}"
         + _build_conviction_context(conviction, positions)
@@ -1088,7 +1141,7 @@ def _build_conviction_context(conviction: dict | None, positions: list[dict]) ->
     return "\n\nPRIOR RECOMMENDATIONS\n" + "\n".join(lines)
 
 
-def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None) -> str:
+def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None) -> str:
     """Return Claude's analysis as markdown (sections 1-4)."""
     client = anthropic.Anthropic()
 
@@ -1096,10 +1149,14 @@ def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, co
         "You are a personal financial analyst writing for a private wealth briefing. "
         "Your tone is editorial, precise, confident — like the Financial Times or The "
         "Economist. You have access to the user's full portfolio data, news, benchmarks, "
-        "and advanced quant metrics including Sharpe, Beta, Alpha, Sortino, VaR, Max "
-        "Drawdown, and rolling 90d Sharpe and 30d/90d Beta. Use these metrics to give specific "
+        "advanced quant metrics including Sharpe, Beta, Alpha, Sortino, VaR, Max "
+        "Drawdown, rolling 90d Sharpe and 30d/90d Beta, and per-holding multi-timeframe "
+        "momentum scores (quartile-ranked, 4=strongest). Use these metrics to give specific "
         "analysis. Write a structured report with exactly these four sections:\n\n"
-        "## (1) Portfolio Performance Summary — key numbers, what's up, what's down.\n"
+        "## (1) Portfolio Performance Summary — key numbers, what's up, what's down. Where "
+        "the MOMENTUM data shows a holding's 1-month move diverging meaningfully from its "
+        "3M/6M/12M trend, or a clear quartile 1 (weakest) or quartile 4 (strongest) holding, "
+        "name it specifically.\n"
         "## (2) Benchmark Comparison — how the portfolio did vs S&P 500, Nasdaq, and MSCI "
         "World. Reference Alpha and Beta where relevant. Where rolling 90d Sharpe or 30d/90d "
         "Beta diverge meaningfully from the full-period values, note whether risk-adjusted "
@@ -1117,7 +1174,7 @@ def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, co
         "FORMATTING RULES: Never use Markdown table syntax (pipe characters and dashes). Never use bullet points (- or *) — use plain paragraphs. When presenting benchmark comparisons or tabular data, write it as flowing prose sentences. Example: 'The S&P 500 returned +8.35% YTD, Nasdaq +11.42%, and MSCI World +8.48% — all well below this portfolio\\'s +23.07%.' Do not use any HTML tags. All output must be plain text with Markdown bold (**text**) only."
     )
 
-    user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction)
+    user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction, momentum)
 
     log.info("Calling Claude API for analysis (model: %s)…", CLAUDE_MODEL)
     response = client.messages.create(
@@ -2063,6 +2120,9 @@ def main() -> None:
         log.info("Computing advanced metrics…")
         metrics = compute_advanced_metrics(positions, fx_rates)
 
+        log.info("Computing momentum scores…")
+        momentum_data = compute_momentum_scores(positions)
+
         if not args.force:
             append_history(summary, issue_number())
         log.info("Generating charts…")
@@ -2070,7 +2130,7 @@ def main() -> None:
 
         log.info("Calling Claude for analysis…")
         conviction = load_conviction()
-        analysis_raw = call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction)
+        analysis_raw = call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction, momentum_data)
         analysis_body, actionable_raw = split_analysis(analysis_raw)
         actionable_items = parse_actionable(actionable_raw)
         save_conviction(conviction, actionable_items, positions, issue_number())
