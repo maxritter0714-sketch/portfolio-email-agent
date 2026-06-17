@@ -831,6 +831,12 @@ def filter_news_by_relevance(articles: list[dict], positions: list[dict]) -> lis
             messages=[{"role": "user", "content": user_prompt}],
         )
         raw = response.content[0].text.strip()
+        # Strip markdown fences if model wraps output in ```json ... ```
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
         scores = json.loads(raw)
         scored = sorted(scores, key=lambda x: x["score"], reverse=True)
         kept_indices = {s["index"] for s in scored if s["score"] >= 1}
@@ -839,7 +845,7 @@ def filter_news_by_relevance(articles: list[dict], positions: list[dict]) -> lis
             (s["score"] for s in scored if s["index"] == articles.index(a)), 0
         ), reverse=True)
         log.info(
-            "Relevance filter: %d → %d articles (dropped %d score-0)",
+            "Relevance filter: %d -> %d articles (dropped %d score-0)",
             len(articles), len(filtered), len(articles) - len(filtered),
         )
         return filtered[:10]
