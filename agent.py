@@ -532,7 +532,7 @@ def generate_charts(positions: list[dict], summary: dict,
     fig, ax = plt.subplots(figsize=(7, 6.5))
     _pie(ax, sizes, labels)
     ax.text(0, 0, f"€{total:,.0f}", ha="center", va="center",
-            fontsize=12, color=DARK_GOLD, fontfamily="serif")
+            fontsize=12, color=TEXT_PRIMARY, fontfamily="serif")
     charts["portfolio_pie"] = _save_fig(fig, "portfolio_pie")
 
     # 2. Sector allocation — top 8 + Others
@@ -1437,11 +1437,11 @@ def build_html_email(
     for i, (label, value, interp) in enumerate(primary_data):
         left_border = f"border-left:1px solid {RULE_FAINT};" if i > 0 else ""
         primary_cells += (
-            f'<td style="text-align:center;padding:22px 10px;{left_border}width:25%;vertical-align:top">'
+            f'<td class="metric-p-td" style="text-align:center;padding:22px 10px;{left_border}width:25%;vertical-align:top">'
             f'<div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
             f'text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};'
             f'margin-bottom:10px">{label}</div>'
-            f'<div style="font-family:Georgia,serif;font-size:26px;color:{TEXT_PRIMARY};'
+            f'<div class="metric-p-val" style="font-family:Georgia,serif;font-size:26px;color:{TEXT_PRIMARY};'
             f'margin-bottom:8px;font-variant-numeric:tabular-nums">{value}</div>'
             f'<div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
             f'color:{TEXT_SECONDARY};line-height:1.4">{interp}</div>'
@@ -1464,19 +1464,19 @@ def build_html_email(
 
     sec_rows = ""
     for i in range(0, len(secondary), 4):
-        sec_rows += "<tr>"
+        sec_rows += '<tr class="metric-s-row">'
         for j in range(4):
             label, value, interp = secondary[i + j]
             if not label:
-                sec_rows += '<td style="width:25%"></td>'
+                sec_rows += '<td class="metric-s-td" style="width:25%"></td>'
                 continue
             sec_rows += (
-                f'<td style="padding:16px 12px;border-bottom:1px solid {RULE_FAINT};'
+                f'<td class="metric-s-td" style="padding:16px 12px;border-bottom:1px solid {RULE_FAINT};'
                 f'vertical-align:top;width:25%">'
                 f'<div style="font-family:Arial,Helvetica,sans-serif;font-size:9px;'
                 f'text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};'
                 f'margin-bottom:4px">{label}</div>'
-                f'<div style="font-family:Georgia,serif;font-size:18px;color:{TEXT_PRIMARY};'
+                f'<div class="metric-s-val" style="font-family:Georgia,serif;font-size:18px;color:{TEXT_PRIMARY};'
                 f'font-variant-numeric:tabular-nums">{value}</div>'
                 f'<div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
                 f'color:{TEXT_SECONDARY};margin-top:3px;line-height:1.35">{interp}</div>'
@@ -1485,9 +1485,10 @@ def build_html_email(
         sec_rows += "</tr>"
 
     # ── Positions table ───────────────────────────────────────────────────────
-    def _th(label: str, align: str = "left") -> str:
+    def _th(label: str, align: str = "left", cls: str = "") -> str:
+        cls_attr = f' class="{cls}"' if cls else ""
         return (
-            f'<th style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
+            f'<th{cls_attr} style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
             f'text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};'
             f'text-align:{align};padding:10px 4px;border-bottom:1px solid {TEXT_PRIMARY};'
             f'font-weight:600">{label}</th>'
@@ -1497,13 +1498,13 @@ def build_html_email(
     for p in positions:
         pos_rows_html += (
             f'<tr>'
-            f'<td style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
+            f'<td class="pos-name-cell" style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
             f'font-family:Georgia,serif;font-size:14px">'
             f'{html.escape(p["name"])}'
             f' <span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
             f'color:{TEXT_SECONDARY};letter-spacing:1px;margin-left:6px">{html.escape(p["ticker"])}</span>'
             f'</td>'
-            f'<td style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
+            f'<td class="hide-mobile" style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
             f'font-family:Arial,Helvetica,sans-serif;font-size:13px;text-align:right;'
             f'font-variant-numeric:tabular-nums;color:{TEXT_PRIMARY}">{p["shares"]:.2f}</td>'
             f'<td style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
@@ -1648,27 +1649,51 @@ def build_html_email(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>The Fortnight &middot; No. {issue_num}</title>
+<style>
+@media only screen and (max-width:480px){{
+  .mast-pad{{padding:20px 16px!important}}
+  .mast-h1{{font-size:26px!important;margin:14px 0 4px!important}}
+  .mast-num{{font-size:22px!important}}
+  .mast-num-sub{{font-size:13px!important}}
+  .mast-col{{display:block!important;width:100%!important;padding-right:0!important;margin-bottom:10px}}
+  .sect-pad{{padding:14px 16px!important}}
+  .sect-pad-top{{padding:24px 16px 14px!important}}
+  .sect-pad-metrics{{padding:8px 16px!important}}
+  .sect-pad-sec{{padding:4px 16px 14px!important}}
+  .headline-p{{font-size:17px!important}}
+  .metric-p-table{{display:block!important;width:100%!important}}
+  .metric-p-row{{display:flex!important;flex-wrap:wrap!important}}
+  .metric-p-td{{width:50%!important;box-sizing:border-box!important;border-left:none!important;border-bottom:1px solid #e8e3d8!important}}
+  .metric-p-val{{font-size:20px!important}}
+  .metric-s-table{{display:block!important;width:100%!important}}
+  .metric-s-row{{display:flex!important;flex-wrap:wrap!important}}
+  .metric-s-td{{width:50%!important;box-sizing:border-box!important}}
+  .metric-s-val{{font-size:15px!important}}
+  .hide-mobile{{display:none!important}}
+  .pos-name-cell{{font-size:12px!important}}
+}}
+</style>
 </head>
 <body style="margin:0;padding:0;background:{BG_CREAM};font-family:Georgia,serif;color:{TEXT_PRIMARY}">
 <div style="max-width:640px;margin:0 auto;background:{BG_CREAM}">
 
 <!-- Masthead -->
 <table width="100%" cellpadding="0" cellspacing="0" style="background:{CHARCOAL};border-bottom:3px solid {GOLD}">
-<tr><td style="padding:40px">
+<tr><td class="mast-pad" style="padding:40px">
   <table width="100%" cellpadding="0" cellspacing="0"><tr>
     <td style="font-family:Arial,Helvetica,sans-serif;font-size:10px;text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY}">Portfolio Report &middot; No. {issue_num}</td>
     <td style="font-family:Arial,Helvetica,sans-serif;font-size:10px;text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};text-align:right">{today_str}</td>
   </tr></table>
-  <h1 style="font-family:Georgia,serif;font-size:38px;font-weight:normal;margin:28px 0 6px;color:{BG_CREAM};letter-spacing:-0.5px">The Fortnight</h1>
+  <h1 class="mast-h1" style="font-family:Georgia,serif;font-size:38px;font-weight:normal;margin:28px 0 6px;color:{BG_CREAM};letter-spacing:-0.5px">The Fortnight</h1>
   <p style="font-family:Georgia,serif;font-style:italic;color:{GOLD};margin:0 0 36px;font-size:14px">A private wealth briefing</p>
   <table width="100%" cellpadding="0" cellspacing="0"><tr>
-    <td style="padding-right:32px;width:50%;vertical-align:top">
+    <td class="mast-col" style="padding-right:32px;width:50%;vertical-align:top">
       <div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};margin-bottom:8px">Total Value</div>
-      <div style="font-family:Georgia,serif;font-size:32px;color:{BG_CREAM};font-variant-numeric:tabular-nums">€{total:,.0f}</div>
+      <div class="mast-num" style="font-family:Georgia,serif;font-size:32px;color:{BG_CREAM};font-variant-numeric:tabular-nums">€{total:,.0f}</div>
     </td>
-    <td style="width:50%;vertical-align:top">
+    <td class="mast-col" style="width:50%;vertical-align:top">
       <div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};margin-bottom:8px">Fortnight P&amp;L</div>
-      <div style="font-family:Georgia,serif;font-size:32px;color:{fortnight_color};font-variant-numeric:tabular-nums">€{fortnight_pl:+,.0f} <span style="font-size:18px;color:{TEXT_SECONDARY}">({fortnight_pct:+.2f}%)</span></div>
+      <div class="mast-num" style="font-family:Georgia,serif;font-size:32px;color:{fortnight_color};font-variant-numeric:tabular-nums">€{fortnight_pl:+,.0f} <span class="mast-num-sub" style="font-size:18px;color:{TEXT_SECONDARY}">({fortnight_pct:+.2f}%)</span></div>
     </td>
   </tr></table>
   <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;border-top:1px solid rgba(255,255,255,0.15)">
@@ -1691,29 +1716,29 @@ def build_html_email(
 </table>
 
 <!-- The Headline -->
-<div style="padding:48px 40px 24px">
-  <p style="font-family:Georgia,serif;font-size:22px;line-height:1.45;color:{TEXT_PRIMARY};margin:0">{headline_html}</p>
+<div class="sect-pad-top" style="padding:48px 40px 24px">
+  <p class="headline-p" style="font-family:Georgia,serif;font-size:22px;line-height:1.45;color:{TEXT_PRIMARY};margin:0">{headline_html}</p>
 </div>
 
 <!-- Primary metric strip -->
-<div style="padding:8px 40px">
-  <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid {TEXT_PRIMARY};border-bottom:1px solid {TEXT_PRIMARY}">
-    <tr>{primary_cells}</tr>
+<div class="sect-pad-metrics" style="padding:8px 40px">
+  <table class="metric-p-table" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid {TEXT_PRIMARY};border-bottom:1px solid {TEXT_PRIMARY}">
+    <tr class="metric-p-row">{primary_cells}</tr>
   </table>
 </div>
 
 <!-- Secondary metric strip -->
-<div style="padding:4px 40px 24px">
-  <table width="100%" cellpadding="0" cellspacing="0">{sec_rows}</table>
+<div class="sect-pad-sec" style="padding:4px 40px 24px">
+  <table class="metric-s-table" width="100%" cellpadding="0" cellspacing="0">{sec_rows}</table>
 </div>
 
 <!-- Section I. Positions -->
-<div style="padding:24px 40px">
+<div class="sect-pad" style="padding:24px 40px">
   {_sect_header("I", "Positions")}
   <table width="100%" cellpadding="0" cellspacing="0">
     <thead><tr>
       {_th("Holding", "left")}
-      {_th("Shares", "right")}
+      {_th("Shares", "right", "hide-mobile")}
       {_th("Value", "right")}
       {_th("P&amp;L", "right")}
       {_th("YTD", "right")}
@@ -1723,13 +1748,13 @@ def build_html_email(
 </div>
 
 <!-- Section II. By the Numbers -->
-<div style="padding:24px 40px">
+<div class="sect-pad" style="padding:24px 40px">
   {_sect_header("II", "By the Numbers")}
   {figs_html}
 </div>
 
 <!-- Section III. The Analysis -->
-<div style="padding:24px 40px">
+<div class="sect-pad" style="padding:24px 40px">
   {_sect_header("III", "The Analysis")}
   <div style="font-family:Georgia,serif;font-size:15px;line-height:1.7;color:{TEXT_PRIMARY}">
     {analysis_html}
@@ -1737,19 +1762,19 @@ def build_html_email(
 </div>
 
 <!-- Section IV. Portfolio News -->
-<div style="padding:24px 40px">
+<div class="sect-pad" style="padding:24px 40px">
   {_sect_header("IV", "Portfolio News")}
   {port_news_html}
 </div>
 
 <!-- Section V. The World -->
-<div style="padding:24px 40px">
+<div class="sect-pad" style="padding:24px 40px">
   {_sect_header("V", "The World")}
   {gen_news_html}
 </div>
 
 <!-- Section VI. Actionable -->
-<div style="padding:24px 40px 48px">
+<div class="sect-pad" style="padding:24px 40px 48px">
   {_sect_header("VI", "Actionable")}
   {actionable_html}
 </div>
