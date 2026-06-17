@@ -16,15 +16,15 @@ Stack: Python · yfinance · NewsAPI · Anthropic Claude · Gmail SMTP
 
 ## Workflow — updating holdings
 1. Export from Finanzfluss → save as `finanzfluss_export.csv`
-2. Add any new ISINs to `ISIN_TO_TICKER` in `import_portfolio.py`
+2. Add any new ISIN overrides to `isin_map.json` (copy from `isin_map.json.example` if it doesn't exist yet — gitignored, never commit)
 3. Run: `python import_portfolio.py --input finanzfluss_export.csv`
 4. Verify `portfolio.csv` looks correct
 5. Test: `python agent.py --force`
 
 ## ISIN map rules
-- Hardcoded map in `import_portfolio.py` is the primary resolution path
-- Fallback 1: OpenFIGI bulk API (Bloomberg, free, 100 ISINs per call)
-- Fallback 2: yfinance Search API (slow, unreliable — last resort)
+- Resolution priority: `isin_map.json` overrides (gitignored, personal) → OpenFIGI bulk API (Bloomberg, free, 100 ISINs per call) → yfinance Search API (slow, unreliable — last resort)
+- `isin_map.json` exists to correct cases where OpenFIGI picks the wrong exchange listing (e.g. London vs. Xetra) — see ADR-002
+- For the cloud (GitHub Actions) run, overrides are pulled from the private `portfolio-agent-data` repo (`_data/isin_map.json`) — keep both copies in sync when you edit one
 - Zertifikate/OS positions are always excluded
 - Positions with `Anzahl = 0` are skipped (sold/zero positions kept for history)
 
