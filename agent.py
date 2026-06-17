@@ -257,7 +257,7 @@ def get_fx_rates() -> dict[str, float]:
     return rates
 
 
-def get_price_changes(symbol: str) -> tuple[float, float, float, float, str, dict, dict, dict]:
+def get_price_changes(symbol: str) -> tuple[float, float, float, float, str, dict, dict, dict, float]:
     ticker = yf.Ticker(symbol)
     hist = ticker.history(period="1y")
     if hist.empty:
@@ -315,8 +315,10 @@ def get_price_changes(symbol: str) -> tuple[float, float, float, float, str, dic
         except Exception:
             pass
 
+    div_ttm_native = float(hist["Dividends"].sum()) if "Dividends" in hist.columns else 0.0
+
     _hist_cache[symbol] = hist["Close"]
-    return current, weekly_pct, monthly_pct, ytd_pct, currency, info, sector_weights, holdings_weights
+    return current, weekly_pct, monthly_pct, ytd_pct, currency, info, sector_weights, holdings_weights, div_ttm_native
 
 
 def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[list[dict], dict]:
@@ -332,7 +334,7 @@ def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[
         avg_buy_eur = float(row["avg_buy_price"])
 
         try:
-            price_native, weekly, monthly, ytd, currency, info, sector_weights, holdings_weights = get_price_changes(symbol)
+            price_native, weekly, monthly, ytd, currency, info, sector_weights, holdings_weights, div_ttm_native = get_price_changes(symbol)
         except Exception as exc:
             log.error("Skipping %s – could not fetch data: %s", symbol, exc)
             continue
@@ -343,6 +345,7 @@ def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[
         cost_eur = shares * avg_buy_eur
         pl_eur = value_eur - cost_eur
         pl_pct = pl_eur / cost_eur * 100 if cost_eur else 0.0
+        dividend_ttm_eur = shares * div_ttm_native * to_eur
 
         sector, region = get_ticker_classification(symbol, info)
         positions.append(
@@ -355,6 +358,7 @@ def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[
                 sector=sector, region=region,
                 sector_weights=sector_weights,
                 holdings_weights=holdings_weights,
+                dividend_ttm_eur=dividend_ttm_eur,
             )
         )
 
@@ -373,10 +377,15 @@ def fetch_portfolio_data(rows: list[dict], fx_rates: dict[str, float]) -> tuple[
     port_monthly = weighted_monthly / total_value_eur if total_value_eur else 0.0
     port_ytd = weighted_ytd / total_value_eur if total_value_eur else 0.0
 
+    total_dividends_ttm_eur = sum(p["dividend_ttm_eur"] for p in positions)
+    portfolio_yield_pct = total_dividends_ttm_eur / total_value_eur * 100 if total_value_eur else 0.0
+
     summary = dict(
         total_value_eur=total_value_eur, total_cost_eur=total_cost_eur,
         total_pl_eur=total_pl_eur, total_pl_pct=total_pl_pct,
         weekly_pct=port_weekly, monthly_pct=port_monthly, ytd_pct=port_ytd,
+        total_dividends_ttm_eur=total_dividends_ttm_eur,
+        portfolio_yield_pct=portfolio_yield_pct,
     )
     return positions, summary
 
@@ -385,7 +394,7 @@ def fetch_benchmarks() -> list[dict]:
     results = []
     for symbol, label in BENCHMARKS:
         try:
-            _, weekly, monthly, ytd, _cur, _info, _sw, _hw = get_price_changes(symbol)
+            _, weekly, monthly, ytd, _cur, _info, _sw, _hw, _div = get_price_changes(symbol)
             results.append(
                 dict(symbol=symbol, name=label, weekly_pct=weekly,
                      monthly_pct=monthly, ytd_pct=ytd)
@@ -1206,7 +1215,9 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         f"Total value: €{summary['total_value_eur']:,.2f} | "
         f"Total P&L: €{summary['total_pl_eur']:+,.2f} ({summary['total_pl_pct']:+.2f}%)\n"
         f"Weekly: {summary['weekly_pct']:+.2f}% | Monthly: {summary['monthly_pct']:+.2f}% | "
-        f"YTD: {summary['ytd_pct']:+.2f}%\n\n"
+        f"YTD: {summary['ytd_pct']:+.2f}%\n"
+        f"Trailing 12M Dividend Income: €{summary.get('total_dividends_ttm_eur', 0):,.2f} "
+        f"({summary.get('portfolio_yield_pct', 0):.2f}% yield)\n\n"
         f"POSITIONS\n{positions_text}\n\n"
         f"BENCHMARKS\n{bench_text}"
         f"{metrics_text}"
@@ -1530,6 +1541,13 @@ def interp_wr(v):
     return "Strong profitable mix"
 
 
+def interp_yield(v):
+    if v < 0.5: return "Growth-oriented, minimal income"
+    if v < 1.5: return "Modest income contribution"
+    if v < 3.0: return "Meaningful income contribution"
+    return "Income-focused profile"
+
+
 # ── HTML helpers ──────────────────────────────────────────────────────────────
 def _color(val: float) -> str:
     return SAGE if val >= 0 else BURGUNDY
@@ -1739,6 +1757,7 @@ def build_html_email(
         ("Correlation", f"{metrics.get('correlation', 0):.2f}",  interp_corr(metrics.get("correlation", 0))),
         ("HHI",        f"{metrics.get('hhi', 0):.3f}",           interp_hhi(metrics.get("hhi", 0))),
         ("Win Rate",   f"{metrics.get('win_rate', 0):.0f}%",     interp_wr(metrics.get("win_rate", 0))),
+        ("Div Yield (TTM)", f"{summary.get('portfolio_yield_pct', 0):.2f}%", interp_yield(summary.get("portfolio_yield_pct", 0))),
     ]
     # Pad to multiple of 4
     while len(secondary) % 4 != 0:
