@@ -469,7 +469,17 @@ _HISTORY_COLS = ("date", "issue", "total_value_eur", "sp500_close")
 def append_history(summary: dict, issue_num: int) -> None:
     """Append one row to history.csv per calendar day (skips duplicate same-day runs)."""
     today_str = date.today().isoformat()
+    write_header = not _HISTORY_PATH.exists()
     if _HISTORY_PATH.exists():
+        # Repair headerless file written by older code or created manually
+        with open(_HISTORY_PATH, newline="", encoding="utf-8") as fh:
+            first_row = next(csv.reader(fh), None)
+        if first_row != list(_HISTORY_COLS):
+            content = _HISTORY_PATH.read_text(encoding="utf-8")
+            _HISTORY_PATH.write_text(
+                ",".join(_HISTORY_COLS) + "\n" + content, encoding="utf-8"
+            )
+            log.info("History: prepended missing header row.")
         with open(_HISTORY_PATH, newline="", encoding="utf-8") as fh:
             existing = list(csv.DictReader(fh))
         if any(r.get("date") == today_str for r in existing):
@@ -487,7 +497,6 @@ def append_history(summary: dict, issue_num: int) -> None:
         "total_value_eur": round(summary["total_value_eur"], 2),
         "sp500_close": round(sp500_close, 4),
     }
-    write_header = not _HISTORY_PATH.exists()
     with open(_HISTORY_PATH, "a", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(_HISTORY_COLS))
         if write_header:
@@ -503,6 +512,9 @@ def generate_history_chart() -> str | None:
     with open(_HISTORY_PATH, newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     if len(rows) < 6:
+        return None
+    if "date" not in rows[0]:
+        log.warning("history.csv missing header row — skipping history chart")
         return None
 
     labels   = [r["date"] for r in rows]
