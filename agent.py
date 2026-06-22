@@ -466,20 +466,32 @@ _HISTORY_PATH = Path("history.csv")
 _HISTORY_COLS = ("date", "issue", "total_value_eur", "sp500_close")
 
 
+def _is_float(value: str | None) -> bool:
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def append_history(summary: dict, issue_num: int) -> None:
     """Append one row to history.csv per calendar day (skips duplicate same-day runs)."""
     today_str = date.today().isoformat()
     write_header = not _HISTORY_PATH.exists()
     if _HISTORY_PATH.exists():
-        # Repair headerless file written by older code or created manually
-        with open(_HISTORY_PATH, newline="", encoding="utf-8") as fh:
+        # Repair headerless or BOM-prefixed files (written by older code or tools like Excel).
+        # utf-8-sig strips BOM so the first-row comparison is reliable.
+        # We also rewrite BOM files to normalise them to clean UTF-8.
+        has_bom = _HISTORY_PATH.read_bytes()[:3] == b"\xef\xbb\xbf"
+        with open(_HISTORY_PATH, newline="", encoding="utf-8-sig") as fh:
             first_row = next(csv.reader(fh), None)
-        if first_row != list(_HISTORY_COLS):
-            content = _HISTORY_PATH.read_text(encoding="utf-8")
-            _HISTORY_PATH.write_text(
-                ",".join(_HISTORY_COLS) + "\n" + content, encoding="utf-8"
-            )
-            log.info("History: prepended missing header row.")
+        bad_header = first_row is None or [c.strip() for c in first_row] != list(_HISTORY_COLS)
+        if bad_header or has_bom:
+            content = _HISTORY_PATH.read_text(encoding="utf-8-sig")
+            if bad_header:
+                content = ",".join(_HISTORY_COLS) + "\n" + content
+            _HISTORY_PATH.write_text(content, encoding="utf-8")
+            log.info("History: repaired header (missing=%s bom=%s).", bad_header, has_bom)
         with open(_HISTORY_PATH, newline="", encoding="utf-8") as fh:
             existing = list(csv.DictReader(fh))
         if any(r.get("date") == today_str for r in existing):
@@ -509,12 +521,14 @@ def generate_history_chart() -> str | None:
     if not _HISTORY_PATH.exists():
         return None
     rows: list[dict] = []
-    with open(_HISTORY_PATH, newline="", encoding="utf-8") as fh:
+    with open(_HISTORY_PATH, newline="", encoding="utf-8-sig") as fh:
         rows = list(csv.DictReader(fh))
+    # Drop any stray non-data rows (e.g. duplicate header lines from BOM repair)
+    rows = [
+        r for r in rows
+        if r.get("date") and _is_float(r.get("total_value_eur")) and _is_float(r.get("sp500_close"))
+    ]
     if len(rows) < 6:
-        return None
-    if "date" not in rows[0]:
-        log.warning("history.csv missing header row — skipping history chart")
         return None
 
     labels   = [r["date"] for r in rows]
@@ -1431,9 +1445,12 @@ def get_history_ytd(current_value: float) -> float | None:
     if not _HISTORY_PATH.exists():
         return None
     current_year = date.today().year
-    with open(_HISTORY_PATH, newline="", encoding="utf-8") as fh:
+    with open(_HISTORY_PATH, newline="", encoding="utf-8-sig") as fh:
         rows = list(csv.DictReader(fh))
-    jan_rows = [r for r in rows if r.get("date", "").startswith(f"{current_year}-01")]
+    jan_rows = [
+        r for r in rows
+        if r.get("date", "").startswith(f"{current_year}-01") and _is_float(r.get("total_value_eur"))
+    ]
     if not jan_rows:
         return None
     jan_value = float(jan_rows[0]["total_value_eur"])
