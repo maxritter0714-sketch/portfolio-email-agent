@@ -1115,6 +1115,17 @@ def fetch_general_news() -> list[dict]:
     seen: set[str] = set()
     articles: list[dict] = []
 
+    def _apply_source_cap(arts: list[dict], cap: int) -> list[dict]:
+        counts: dict[str, int] = {}
+        out: list[dict] = []
+        for a in arts:
+            src = a.get("source", "Unknown")
+            if counts.get(src, 0) >= cap:
+                continue
+            counts[src] = counts.get(src, 0) + 1
+            out.append(a)
+        return out
+
     # Premium sources first
     try:
         resp = newsapi.get_everything(
@@ -1129,7 +1140,7 @@ def fetch_general_news() -> list[dict]:
         log.warning("Premium-source query failed (%s) — falling back", exc)
 
     # Fallback to all sources if we came up short
-    if len(articles) < 5:
+    if len(articles) < 7:
         try:
             resp = newsapi.get_everything(
                 q=query, language="en", sort_by="relevancy", page_size=40,
@@ -1138,7 +1149,7 @@ def fetch_general_news() -> list[dict]:
         except Exception as exc:
             log.error("Failed to fetch general news: %s", exc)
 
-    articles = articles[:5]
+    articles = _apply_source_cap(articles, cap=2)[:7]
     log.info("Fetched %d general news articles", len(articles))
     return articles
 
