@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import smtplib
+from collections.abc import Callable
 import sys
 import tempfile
 import traceback
@@ -978,44 +979,65 @@ def fetch_portfolio_news(positions: list[dict]) -> list[dict]:
         return []
 
 
-def filter_news_by_relevance(articles: list[dict], positions: list[dict]) -> list[dict]:
-    """Use Claude Haiku to score articles 0-2 and return top 10 by score."""
+def filter_news_by_relevance(
+    articles: list[dict],
+    positions: list[dict],
+    min_score: int = 2,
+    max_items: int = 10,
+    keyword_fallback: Callable[[list[dict]], list[dict]] | None = None,
+) -> list[dict]:
+    """Use Claude Haiku to score articles 0-2 and return top max_items by score.
+
+    min_score=2 keeps only direct holding news (score 1 = sector/macro context,
+    which belongs in The World section, not Portfolio News).
+    """
     if not articles:
         return articles
 
-    ticker_name_list = ", ".join(
-        f"{p['ticker']} ({p['name']})" for p in positions
-    )
-    articles_text = "\n".join(
-        f"{i}: {a['headline']} [{a['source']}]"
-        for i, a in enumerate(articles)
-    )
-
-    system_prompt = (
-        "You are a financial news relevance classifier. Your only job is to decide "
-        "whether a news article is relevant to an investor's stock portfolio. "
-        "Return only valid JSON, no preamble, no markdown."
-    )
-    user_prompt = (
-        f"A portfolio investor holds these tickers and company names:\n{ticker_name_list}\n\n"
-        "Rate each of the following news articles for relevance to this portfolio on a scale of 0-2:\n"
-        "- 0 = not relevant (gaming hardware reviews, entertainment, unrelated consumer products)\n"
-        "- 1 = tangentially relevant (sector news, macro context)\n"
-        "- 2 = directly relevant (specific company news, earnings, analyst ratings, "
-        "product launches affecting holdings)\n\n"
-        'Return a JSON array in this exact format:\n'
-        '[{"index": 0, "score": 2, "reason": "Direct AMD earnings news"}, ...]\n\n'
-        f"Articles:\n{articles_text}"
-    )
+    def _fallback(exc: Exception) -> list[dict]:
+        log.warning("Relevance filter failed (%s) — using %s",
+                    exc, "keyword fallback" if keyword_fallback else "unfiltered list")
+        base = keyword_fallback(articles) if keyword_fallback else articles
+        return base[:max_items]
 
     try:
+        ticker_name_list = ", ".join(
+            f"{p['ticker']} ({p['name']})" for p in positions
+        )
+        articles_text = "\n".join(
+            f"{i}: {a['headline']} [{a['source']}]"
+            for i, a in enumerate(articles)
+        )
+
+        system_prompt = (
+            "You are a financial news relevance classifier. Your only job is to decide "
+            "whether a news article is relevant to an investor's stock portfolio. "
+            "Return only valid JSON, no preamble, no markdown."
+        )
+        user_prompt = (
+            f"A portfolio investor holds these tickers and company names:\n{ticker_name_list}\n\n"
+            "Rate each of the following news articles for relevance to this portfolio on a scale of 0-2:\n"
+            "- 0 = not relevant (gaming hardware reviews, entertainment, unrelated consumer products)\n"
+            "- 1 = tangentially relevant (sector news, macro context)\n"
+            "- 2 = directly relevant (specific company news, earnings, analyst ratings, "
+            "product launches affecting holdings)\n\n"
+            'Return a JSON array in this exact format:\n'
+            '[{"index": 0, "score": 2}, ...]\n\n'
+            f"Articles:\n{articles_text}"
+        )
+
         client = anthropic.Anthropic()
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
+            max_tokens=4096,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
+
+        if response.stop_reason == "max_tokens":
+            log.warning("Relevance filter response truncated (stop_reason=max_tokens) — falling back")
+            return _fallback(RuntimeError("max_tokens"))
+
         raw = response.content[0].text.strip()
         # Strip markdown fences if model wraps output in ```json ... ```
         if raw.startswith("```"):
@@ -1023,21 +1045,36 @@ def filter_news_by_relevance(articles: list[dict], positions: list[dict]) -> lis
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.strip()
-        scores = json.loads(raw)
-        scored = sorted(scores, key=lambda x: x["score"], reverse=True)
-        kept_indices = {s["index"] for s in scored if s["score"] >= 1}
-        filtered = [a for i, a in enumerate(articles) if i in kept_indices]
-        filtered.sort(key=lambda a: next(
-            (s["score"] for s in scored if s["index"] == articles.index(a)), 0
-        ), reverse=True)
+
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list):
+            raise ValueError(f"Expected JSON array, got {type(parsed).__name__}")
+
+        score_by_index: dict[int, int] = {}
+        for entry in parsed:
+            try:
+                idx = int(entry["index"])
+                score = int(entry["score"])
+                if 0 <= idx < len(articles):
+                    score_by_index[idx] = score
+            except (KeyError, TypeError, ValueError):
+                continue
+
+        kept = [
+            (i, a) for i, a in enumerate(articles)
+            if score_by_index.get(i, 0) >= min_score
+        ]
+        kept.sort(key=lambda ia: score_by_index.get(ia[0], 0), reverse=True)
+        filtered = [a for _, a in kept]
+
         log.info(
-            "Relevance filter: %d -> %d articles (dropped %d score-0)",
-            len(articles), len(filtered), len(articles) - len(filtered),
+            "Relevance filter: %d -> %d articles (dropped %d below score %d)",
+            len(articles), len(filtered), len(articles) - len(filtered), min_score,
         )
-        return filtered[:10]
+        return filtered[:max_items]
+
     except Exception as exc:
-        log.warning("Relevance filter failed, using unfiltered list: %s", exc)
-        return articles[:10]
+        return _fallback(exc)
 
 
 _MACRO_KEYWORDS = [
@@ -1048,37 +1085,41 @@ _MACRO_KEYWORDS = [
 _EXCLUDE_KEYWORDS = [
     "airline", "airlines", "podcast", "podcasts", "celebrity", "sport", "sports",
 ]
-_PREMIUM_SOURCES = (
-    "reuters,bloomberg,the-wall-street-journal,"
-    "financial-times,the-economist,bbc-news,associated-press"
-)
+
+def _compile_kw(keywords: list[str]) -> re.Pattern:
+    return re.compile(r"\b(?:" + "|".join(re.escape(k) for k in keywords) + r")\b")
+
+
+_MACRO_RE = _compile_kw(_MACRO_KEYWORDS)
+_EXCLUDE_RE = _compile_kw(_EXCLUDE_KEYWORDS)
+
+_POLITICS_RE = _compile_kw([
+    "election", "president", "senator", "government", "policy", "regulation",
+    "tariff", "war", "treaty", "military", "sanction", "congress", "vote",
+    "parliament", "ukraine", "gaza", "nato", "putin", "biden", "trump",
+])
+_SCIENCE_RE = _compile_kw([
+    "ai", "breakthrough", "discovery", "vaccine", "climate", "research",
+    "scientist", "satellite", "quantum", "study", "nasa", "spacex",
+])
+_ECONOMY_RE = _compile_kw([
+    "fed", "inflation", "rate", "gdp", "trade", "oil", "market", "economy",
+    "bank", "dollar", "euro", "recession", "growth", "stock",
+])
 
 
 def _matches_macro(title: str) -> bool:
     t = title.lower()
-    if any(re.search(r"\b" + re.escape(k) + r"\b", t) for k in _EXCLUDE_KEYWORDS):
+    if _EXCLUDE_RE.search(t):
         return False
-    return any(re.search(r"\b" + re.escape(k) + r"\b", t) for k in _MACRO_KEYWORDS)
+    return bool(_MACRO_RE.search(t))
 
 
 def _classify_news(title: str) -> str:
     t = title.lower()
-    politics_kw = [
-        "election", "president", "senator", "government", "policy", "regulation",
-        "tariff", "war", "treaty", "military", "sanction", "congress", "vote",
-        "parliament", "ukraine", "gaza", "nato", "putin", "biden", "trump",
-    ]
-    science_kw = [
-        "ai", "breakthrough", "discovery", "vaccine", "climate", "research",
-        "scientist", "satellite", "quantum", "study", "nasa", "spacex",
-    ]
-    economy_kw = [
-        "fed", "inflation", "rate", "gdp", "trade", "oil", "market", "economy",
-        "bank", "dollar", "euro", "recession", "growth", "stock",
-    ]
-    p = sum(1 for k in politics_kw if re.search(r"\b" + k + r"\b", t))
-    s = sum(1 for k in science_kw  if re.search(r"\b" + k + r"\b", t))
-    e = sum(1 for k in economy_kw  if re.search(r"\b" + k + r"\b", t))
+    p = len(_POLITICS_RE.findall(t))
+    s = len(_SCIENCE_RE.findall(t))
+    e = len(_ECONOMY_RE.findall(t))
     if p >= s and p >= e and p > 0:
         return "POLITICS"
     if s > e and s > 0:
@@ -1086,22 +1127,110 @@ def _classify_news(title: str) -> str:
     return "ECONOMY"
 
 
+def _is_dup(title: str, kept: list[str], threshold: float = 0.8) -> bool:
+    """Fuzzy duplicate check using token-sorted character ratio (stdlib only)."""
+    from difflib import SequenceMatcher
+
+    def _norm(s: str) -> str:
+        return " ".join(sorted(s.lower().split()))
+
+    nt = _norm(title)
+    return any(SequenceMatcher(None, nt, _norm(k)).ratio() >= threshold for k in kept)
+
+
+_CLIMATE_QUERY = (
+    "climate OR emissions OR renewable OR \"energy transition\" OR "
+    "\"oil price\" OR \"natural gas\" OR \"power grid\" OR \"net zero\""
+)
+
+_TOP_HEADLINE_CATEGORIES = [
+    ("business", "Economy/Markets"),
+    ("science",  "Science/Tech"),
+    ("health",   "Health"),
+    ("general",  "Politics"),
+]
+
+
+def _select_world_news(articles: list[dict], max_items: int = 7) -> list[dict]:
+    """Haiku pass: pick the most substantive, category-diverse world news items."""
+    if not articles:
+        return []
+
+    articles_text = "\n".join(
+        f"{i}: [{a.get('topic', a.get('category', ''))}] {a['headline']} [{a['source']}]"
+        for i, a in enumerate(articles)
+    )
+    system_prompt = (
+        "You are a world news editor curating a weekly digest. "
+        "Return only valid JSON, no preamble, no markdown."
+    )
+    user_prompt = (
+        f"Select the {max_items} most substantive, newsworthy articles from the list below.\n\n"
+        "Keep: geopolitical events, economic data releases, scientific discoveries, "
+        "policy decisions, market-moving news.\n"
+        "Discard: lifestyle tips, celebrity/royal gossip, sports scores, product reviews, "
+        "PR announcements, lottery results, recipes, wellness advice.\n"
+        "Ensure variety — do not pick more than 2 articles from the same topic bucket.\n\n"
+        f'Return a JSON array of selected indices only: [{{"index": 0}}, ...]\n\n'
+        f"Articles:\n{articles_text}"
+    )
+
+    try:
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        if response.stop_reason == "max_tokens":
+            log.warning("World news selection truncated — using first %d articles", max_items)
+            return articles[:max_items]
+
+        raw = response.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list):
+            raise ValueError(f"Expected list, got {type(parsed).__name__}")
+
+        selected: list[dict] = []
+        for entry in parsed:
+            try:
+                idx = int(entry["index"])
+                if 0 <= idx < len(articles):
+                    selected.append(articles[idx])
+            except (KeyError, TypeError, ValueError):
+                continue
+
+        return selected[:max_items]
+
+    except Exception as exc:
+        log.warning("World news selection failed (%s) — using first %d articles", exc, max_items)
+        return articles[:max_items]
+
+
 def fetch_general_news() -> list[dict]:
-    """Macro-relevant headlines from premium sources, filtered for substance."""
+    """Curated world digest: per-category top-headlines + Haiku selection pass."""
     api_key = os.getenv("NEWS_API_KEY", "")
     newsapi = NewsApiClient(api_key=api_key)
 
-    query = " OR ".join(_MACRO_KEYWORDS)
+    seen: list[str] = []
+    articles: list[dict] = []
 
-    def _collect(resp_articles, existing_titles):
+    def _collect(resp_articles, topic: str) -> list[dict]:
         out: list[dict] = []
         for a in resp_articles:
             title = (a.get("title") or "").strip()
-            if not title or title == "[Removed]" or title in existing_titles:
+            if not title or title == "[Removed]":
                 continue
-            if not _matches_macro(title):
+            if _is_dup(title, seen):
                 continue
-            existing_titles.add(title)
+            seen.append(title)
             out.append(dict(
                 headline=title,
                 description=a.get("description") or "",
@@ -1109,49 +1238,36 @@ def fetch_general_news() -> list[dict]:
                 date=(a.get("publishedAt") or "")[:10],
                 url=a.get("url", ""),
                 category=_classify_news(title),
+                topic=topic,
             ))
         return out
 
-    seen: set[str] = set()
-    articles: list[dict] = []
+    # Per-category top-headlines
+    for api_cat, topic in _TOP_HEADLINE_CATEGORIES:
+        try:
+            resp = newsapi.get_top_headlines(category=api_cat, language="en", page_size=20)
+            batch = _collect(resp.get("articles", []), topic)
+            articles.extend(batch)
+            log.debug("top-headlines category=%s: %d articles", api_cat, len(batch))
+        except Exception as exc:
+            log.warning("top-headlines category=%s failed: %s", api_cat, exc)
 
-    def _apply_source_cap(arts: list[dict], cap: int) -> list[dict]:
-        counts: dict[str, int] = {}
-        out: list[dict] = []
-        for a in arts:
-            src = a.get("source", "Unknown")
-            if counts.get(src, 0) >= cap:
-                continue
-            counts[src] = counts.get(src, 0) + 1
-            out.append(a)
-        return out
-
-    # Premium sources first
+    # Climate/Energy via /everything (no native top-headlines category)
     try:
         resp = newsapi.get_everything(
-            q=query,
-            sources=_PREMIUM_SOURCES,
-            language="en",
-            sort_by="relevancy",
-            page_size=40,
+            q=_CLIMATE_QUERY, language="en", sort_by="relevancy", page_size=20,
         )
-        articles.extend(_collect(resp.get("articles", []), seen))
+        batch = _collect(resp.get("articles", []), "Climate/Energy")
+        articles.extend(batch)
+        log.debug("Climate/Energy query: %d articles", len(batch))
     except Exception as exc:
-        log.warning("Premium-source query failed (%s) — falling back", exc)
+        log.warning("Climate/Energy query failed: %s", exc)
 
-    # Fallback to all sources if we came up short
-    if len(articles) < 7:
-        try:
-            resp = newsapi.get_everything(
-                q=query, language="en", sort_by="relevancy", page_size=40,
-            )
-            articles.extend(_collect(resp.get("articles", []), seen))
-        except Exception as exc:
-            log.error("Failed to fetch general news: %s", exc)
+    log.info("fetch_general_news: %d deduplicated articles before selection", len(articles))
 
-    articles = _apply_source_cap(articles, cap=2)[:7]
-    log.info("Fetched %d general news articles", len(articles))
-    return articles
+    selected = _select_world_news(articles, max_items=7)
+    log.info("Fetched %d general news articles", len(selected))
+    return selected
 
 
 # ── Claude analysis ───────────────────────────────────────────────────────────
