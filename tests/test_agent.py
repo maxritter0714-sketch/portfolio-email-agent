@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from datetime import date as real_date
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import agent
@@ -149,6 +150,11 @@ def test_split_analysis_actionable_not_in_body():
 def test_split_analysis_extracts_actionable_text():
     _, actionable = split_analysis(SAMPLE_ANALYSIS)
     assert "[TRIM]" in actionable
+
+
+def test_extract_text_from_response_uses_text_attribute():
+    response = SimpleNamespace(content=[SimpleNamespace(text="hello world")])
+    assert agent._extract_text_from_response(response) == "hello world"
 
 
 # ── parse_actionable ──────────────────────────────────────────────────────────

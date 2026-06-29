@@ -23,20 +23,19 @@ from pathlib import Path
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Any, Literal, cast
 
 import anthropic
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
 from newsapi import NewsApiClient
 
-try:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
-    CHARTS_AVAILABLE = True
-except ImportError:
-    CHARTS_AVAILABLE = False
+CHARTS_AVAILABLE = True
 
 # ── Environment ───────────────────────────────────────────────────────────────
 load_dotenv()
@@ -63,6 +62,9 @@ CLAUDE_MODEL = "claude-sonnet-4-6"
 
 # Populated by get_price_changes; reused by compute_advanced_metrics.
 _hist_cache: dict = {}
+
+
+
 
 # ── Editorial colour palette ──────────────────────────────────────────────────
 BG_CREAM        = "#fafaf7"
@@ -285,7 +287,7 @@ def get_price_changes(symbol: str) -> tuple[float, float, float, float, str, dic
     monthly_pct = (current - month_ref) / month_ref * 100
 
     this_year = date.today().year
-    ytd_hist = hist[hist.index.year == this_year]
+    ytd_hist = hist[pd.DatetimeIndex(hist.index).year == this_year]
     if not ytd_hist.empty:
         ytd_ref = float(ytd_hist["Close"].iloc[0])
         ytd_pct = (current - ytd_ref) / ytd_ref * 100
@@ -312,7 +314,12 @@ def get_price_changes(symbol: str) -> tuple[float, float, float, float, str, dic
         try:
             top = ticker.funds_data.top_holdings
             if top is not None and not top.empty:
-                holdings_weights = top["Holding Percent"].to_dict()
+                holdings_weights = {}
+                for key, value in top["Holding Percent"].to_dict().items():
+                    try:
+                        holdings_weights[str(key)] = float(value)
+                    except (TypeError, ValueError):
+                        continue
         except Exception:
             pass
 
@@ -467,12 +474,29 @@ _HISTORY_PATH = Path("history.csv")
 _HISTORY_COLS = ("date", "issue", "total_value_eur", "sp500_close")
 
 
-def _is_float(value: str | None) -> bool:
-    try:
-        float(value)
-        return True
-    except (TypeError, ValueError):
+def _extract_text_from_response(response: Any) -> str:
+    content = getattr(response, "content", None)
+    if not content:
+        return ""
+    for block in content:
+        if isinstance(block, str):
+            return block
+        text = getattr(block, "text", None)
+        if isinstance(text, str):
+            return text
+    return ""
+
+
+def _is_float(value: object | None) -> bool:
+    if value is None:
         return False
+    if isinstance(value, (str, bytes, bytearray, int, float, np.integer, np.floating)):
+        try:
+            float(value)
+            return True
+        except (TypeError, ValueError):
+            return False
+    return False
 
 
 def append_history(summary: dict, issue_num: int) -> None:
@@ -504,12 +528,15 @@ def append_history(summary: dict, issue_num: int) -> None:
         sp500_close = 0.0
     else:
         sp500_close = float(sp500_series.iloc[-1])
-    row = {
-        "date": today_str,
-        "issue": issue_num,
-        "total_value_eur": round(summary["total_value_eur"], 2),
-        "sp500_close": round(sp500_close, 4),
-    }
+    row = cast(
+        dict[Literal["date", "issue", "total_value_eur", "sp500_close"], Any],
+        {
+            "date": today_str,
+            "issue": issue_num,
+            "total_value_eur": round(summary["total_value_eur"], 2),
+            "sp500_close": round(sp500_close, 4),
+        },
+    )
     with open(_HISTORY_PATH, "a", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(_HISTORY_COLS))
         if write_header:
@@ -741,8 +768,8 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
     if len(common_idx) < 60:
         return {}
 
-    pr = port_ret_series.loc[common_idx].values.astype(float)
-    sr = sp500_ret.loc[common_idx].values.astype(float)
+    pr = np.asarray(port_ret_series.loc[common_idx].values, dtype=float)
+    sr = np.asarray(sp500_ret.loc[common_idx].values, dtype=float)
 
     ann_ret = np.mean(pr) * TDAYS
     ann_vol = np.std(pr, ddof=1) * np.sqrt(TDAYS)
@@ -1038,7 +1065,7 @@ def filter_news_by_relevance(
             log.warning("Relevance filter response truncated (stop_reason=max_tokens) — falling back")
             return _fallback(RuntimeError("max_tokens"))
 
-        raw = response.content[0].text.strip()
+        raw = _extract_text_from_response(response).strip()
         # Strip markdown fences if model wraps output in ```json ... ```
         if raw.startswith("```"):
             raw = raw.split("```", 2)[1]
@@ -1187,7 +1214,7 @@ def _select_world_news(articles: list[dict], max_items: int = 7) -> list[dict]:
             log.warning("World news selection truncated — using first %d articles", max_items)
             return articles[:max_items]
 
-        raw = response.content[0].text.strip()
+        raw = _extract_text_from_response(response).strip()
         if raw.startswith("```"):
             raw = raw.split("```", 2)[1]
             if raw.startswith("json"):
@@ -1324,10 +1351,10 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         top5 = momentum[:5]
         bottom5 = momentum[5:][-5:]
         momentum_text = (
-            f"\n\nMOMENTUM (quartile 4 = strongest, 1 = weakest; score weights "
-            f"3M/6M/12M returns — 1M is shown for context but excluded from "
-            f"the score since short-term moves tend to mean-revert)\n"
-            f"Top:\n" + "\n".join(_fmt_mom(d) for d in top5)
+            "\n\nMOMENTUM (quartile 4 = strongest, 1 = weakest; score weights "
+            "3M/6M/12M returns — 1M is shown for context but excluded from "
+            "the score since short-term moves tend to mean-revert)\n"
+            "Top:\n" + "\n".join(_fmt_mom(d) for d in top5)
         )
         if bottom5:
             momentum_text += "\nBottom:\n" + "\n".join(_fmt_mom(d) for d in bottom5)
@@ -1336,11 +1363,11 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         amplified = [d for d in lookthrough if d["kind"] == "amplified"]
         hidden = [d for d in lookthrough if d["kind"] == "hidden"]
         lookthrough_text = (
-            f"\n\nLOOK-THROUGH EXPOSURE (factual only, not a risk signal — more or "
-            f"hidden exposure to a name is not inherently good or bad, that depends "
-            f"on the reader's own view of it; ETF top_holdings only covers the "
-            f"largest ~10 constituents per fund, so this is a conservative floor, "
-            f"not exhaustive)\n"
+            "\n\nLOOK-THROUGH EXPOSURE (factual only, not a risk signal — more or "
+            "hidden exposure to a name is not inherently good or bad, that depends "
+            "on the reader's own view of it; ETF top_holdings only covers the "
+            "largest ~10 constituents per fund, so this is a conservative floor, "
+            "not exhaustive)\n"
         )
         if amplified:
             lookthrough_text += (
@@ -1481,7 +1508,7 @@ def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, co
         response.usage.input_tokens,
         response.usage.cache_read_input_tokens or 0,
     )
-    return response.content[0].text
+    return _extract_text_from_response(response)
 
 
 def call_claude_headline(summary: dict, benchmarks: list[dict], metrics: dict) -> str:
@@ -1521,7 +1548,7 @@ def call_claude_headline(summary: dict, benchmarks: list[dict], metrics: dict) -
         system=[{"type": "text", "text": system}],
         messages=[{"role": "user", "content": context}],
     )
-    text = response.content[0].text.strip()
+    text = _extract_text_from_response(response).strip()
     # Strip surrounding quotes if Claude added any
     text = text.strip('"').strip("'").strip()
     # Keep to one line
@@ -2461,7 +2488,7 @@ def main() -> None:
                 fh.write(html)
             log.info("Preview written to preview.html (%d chart files in %s)",
                      len(charts), tempfile.gettempdir())
-            print(f"Preview written to preview.html.")
+            print("Preview written to preview.html.")
             # Clean up temp charts
             for fp in charts.values():
                 try:
