@@ -1286,52 +1286,73 @@ def _build_conviction_context(conviction: dict | None, positions: list[dict]) ->
     return "\n\nPRIOR RECOMMENDATIONS\n" + "\n".join(lines)
 
 
+_PROMPT_PERSONA = (
+    "You are a personal financial analyst writing for a private wealth briefing. "
+    "Your tone is editorial, precise, confident — like the Financial Times or The "
+    "Economist. You have access to the user's full portfolio data, news, benchmarks, "
+    "advanced quant metrics including Sharpe, Beta, Alpha, Sortino, VaR, Max "
+    "Drawdown, rolling 90d Sharpe and 30d/90d Beta, per-holding multi-timeframe "
+    "momentum scores (quartile-ranked, 4=strongest), and LOOK-THROUGH EXPOSURE data "
+    "showing stocks embedded inside held ETFs beyond any direct position. Use these "
+    "metrics to give specific analysis."
+)
+
+_PROMPT_STRUCTURE = (
+    "Write a structured report with exactly these four sections:\n\n"
+    "## (1) Portfolio Performance Summary — key numbers, what's up, what's down. Where "
+    "the MOMENTUM data shows a holding's 1-month move diverging meaningfully from its "
+    "3M/6M/12M trend, or a clear quartile 1 (weakest) or quartile 4 (strongest) holding, "
+    "name it specifically. Where LOOK-THROUGH EXPOSURE shows a directly-held "
+    "stock's true effective weight is meaningfully higher than its direct position "
+    "alone, or shows non-trivial exposure to a company held only through ETFs, "
+    "mention it as a factual data point — not as a problem to fix. Whether more "
+    "or hidden exposure to a given name is desirable depends on the reader's own "
+    "view of that company, not on the metric itself.\n"
+    "## (2) Benchmark Comparison — how the portfolio did vs S&P 500, Nasdaq, and MSCI "
+    "World. Reference Alpha and Beta where relevant. Where rolling 90d Sharpe or 30d/90d "
+    "Beta diverge meaningfully from the full-period values, note whether risk-adjusted "
+    "returns or market sensitivity are improving or deteriorating.\n"
+    "## (3) News & Market Context — the 3 most important implications of the news for "
+    "this specific portfolio. Format EACH item on its own line as:\n"
+    "[IMPLICATION] Title — One sentence connecting the news to a specific holding or theme.\n"
+    "where IMPLICATION is the literal prefix. Do not summarise the news — state what it "
+    "means for this portfolio. Do not use bullets or numbers — just the [IMPLICATION] prefix.\n"
+    "## (4) Actionable Suggestions — 3 to 5 specific recommendations. Format EACH item "
+    "on its own line as:\n"
+    "[ACTION] Title — Detail sentence.\n"
+    "where ACTION is EXACTLY one of: TRIM, EXIT, RESEARCH, ADD. Do not use bullets or "
+    "numbers — just the [ACTION] prefix. Example:\n"
+    "[TRIM] Reduce NVDA concentration — At 22% of portfolio, HHI is elevated; "
+    "trimming to 15% would still capture upside while diversifying tail risk."
+)
+
+_PROMPT_FORMATTING = (
+    "FORMATTING RULES: "
+    "Never use Markdown table syntax (pipe characters and dashes). "
+    "Never use bullet points (- or *) — use plain paragraphs. "
+    "When presenting benchmark comparisons or tabular data, write it as flowing prose sentences. "
+    "Example: 'The S&P 500 returned +8.35% YTD, Nasdaq +11.42%, and MSCI World +8.48% — "
+    "all well below this portfolio\\'s +23.07%.' "
+    "Do not use any HTML tags. "
+    "All output must be plain text with Markdown bold (**text**) only. "
+    "Use **bold** sparingly for headline figures. Be direct and concise. "
+    "Never add disclaimers, caveats, or 'this is not financial advice' language. "
+    "The reader is the portfolio owner — treat them as an informed adult."
+)
+
+
 def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None) -> str:
     """Return Claude's analysis as markdown (sections 1-4)."""
     client = anthropic.Anthropic()
 
-    system_prompt = (
-        "You are a personal financial analyst writing for a private wealth briefing. "
-        "Your tone is editorial, precise, confident — like the Financial Times or The "
-        "Economist. You have access to the user's full portfolio data, news, benchmarks, "
-        "advanced quant metrics including Sharpe, Beta, Alpha, Sortino, VaR, Max "
-        "Drawdown, rolling 90d Sharpe and 30d/90d Beta, per-holding multi-timeframe "
-        "momentum scores (quartile-ranked, 4=strongest), and LOOK-THROUGH EXPOSURE data "
-        "showing stocks embedded inside held ETFs beyond any direct position. Use these "
-        "metrics to give specific analysis. Write a structured report with exactly these "
-        "four sections:\n\n"
-        "## (1) Portfolio Performance Summary — key numbers, what's up, what's down. Where "
-        "the MOMENTUM data shows a holding's 1-month move diverging meaningfully from its "
-        "3M/6M/12M trend, or a clear quartile 1 (weakest) or quartile 4 (strongest) holding, "
-        "name it specifically. Where LOOK-THROUGH EXPOSURE shows a directly-held "
-        "stock's true effective weight is meaningfully higher than its direct position "
-        "alone, or shows non-trivial exposure to a company held only through ETFs, "
-        "mention it as a factual data point — not as a problem to fix. Whether more "
-        "or hidden exposure to a given name is desirable depends on the reader's own "
-        "view of that company, not on the metric itself.\n"
-        "## (2) Benchmark Comparison — how the portfolio did vs S&P 500, Nasdaq, and MSCI "
-        "World. Reference Alpha and Beta where relevant. Where rolling 90d Sharpe or 30d/90d "
-        "Beta diverge meaningfully from the full-period values, note whether risk-adjusted "
-        "returns or market sensitivity are improving or deteriorating.\n"
-        "## (3) News & Market Context — the 3 most important implications of the news for "
-        "this specific portfolio.\n"
-        "## (4) Actionable Suggestions — 3 to 5 specific recommendations. Format EACH item "
-        "on its own line as:\n"
-        "[ACTION] Title — Detail sentence.\n"
-        "where ACTION is EXACTLY one of: TRIM, EXIT, RESEARCH, ADD. Do not use bullets or "
-        "numbers — just the [ACTION] prefix. Example:\n"
-        "[TRIM] Reduce NVDA concentration — At 22% of portfolio, HHI is elevated; "
-        "trimming to 15% would still capture upside while diversifying tail risk.\n\n"
-        "Use **bold** sparingly for headline figures. Be direct and concise. No disclaimers.\n\n"
-        "FORMATTING RULES: Never use Markdown table syntax (pipe characters and dashes). Never use bullet points (- or *) — use plain paragraphs. When presenting benchmark comparisons or tabular data, write it as flowing prose sentences. Example: 'The S&P 500 returned +8.35% YTD, Nasdaq +11.42%, and MSCI World +8.48% — all well below this portfolio\\'s +23.07%.' Do not use any HTML tags. All output must be plain text with Markdown bold (**text**) only."
-    )
+    system_prompt = "\n\n".join([_PROMPT_PERSONA, _PROMPT_STRUCTURE, _PROMPT_FORMATTING])
 
     user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction, momentum, lookthrough)
 
     log.info("Calling Claude API for analysis (model: %s)…", CLAUDE_MODEL)
     response = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=2048,
+        max_tokens=3000,
         system=[{
             "type": "text",
             "text": system_prompt,
