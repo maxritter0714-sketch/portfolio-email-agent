@@ -576,10 +576,12 @@ def generate_history_chart() -> str | None:
     ax.axhline(100, color=TEXT_SECONDARY, linewidth=0.5, linestyle=":")
     ax.set_xticks(range(len(labels)))
     ax.set_xticklabels(
-        [f"#{r['issue']}" for r in rows],
+        [pd.Timestamp(r["date"]).strftime("%d %b '%y").lstrip("0") for r in rows],
         fontsize=7, color=TEXT_PRIMARY, fontfamily="serif", rotation=45, ha="right",
     )
     ax.tick_params(axis="y", labelsize=8, colors=TEXT_PRIMARY)
+    ax.set_title("Since inception, indexed to 100 at start", fontsize=8,
+                 color=TEXT_SECONDARY, fontfamily="serif", pad=6)
     ax.set_ylabel("Indexed (start = 100)", fontsize=8, color=TEXT_SECONDARY,
                   fontfamily="serif")
     ax.legend(fontsize=8, frameon=False, labelcolor=TEXT_PRIMARY)
@@ -1452,9 +1454,13 @@ _PROMPT_STRUCTURE = (
     "or hidden exposure to a given name is desirable depends on the reader's own "
     "view of that company, not on the metric itself.\n"
     "## (2) Benchmark Comparison — how the portfolio did vs S&P 500, Nasdaq, and MSCI "
-    "World. Reference Alpha and Beta where relevant. Where rolling 90d Sharpe or 30d/90d "
-    "Beta diverge meaningfully from the full-period values, note whether risk-adjusted "
-    "returns or market sensitivity are improving or deteriorating.\n"
+    "World. ALWAYS cite all three benchmarks — do not omit one because it makes the "
+    "comparison look worse. ALWAYS compare the same time period: YTD vs YTD, or "
+    "fortnight vs fortnight — never mix since-inception portfolio returns against "
+    "YTD benchmark returns. Reference Alpha and Beta where relevant. Where rolling "
+    "90d Sharpe or 30d/90d Beta diverge meaningfully from the full-period values, "
+    "note whether risk-adjusted returns or market sensitivity are improving or "
+    "deteriorating.\n"
     "## (3) News & Market Context — the 3 most important implications of the news for "
     "this specific portfolio. Format EACH item on its own line as:\n"
     "[IMPLICATION] Title — One sentence connecting the news to a specific holding or theme.\n"
@@ -1466,7 +1472,10 @@ _PROMPT_STRUCTURE = (
     "where ACTION is EXACTLY one of: TRIM, EXIT, RESEARCH, ADD. Do not use bullets or "
     "numbers — just the [ACTION] prefix. Example:\n"
     "[TRIM] Reduce NVDA concentration — At 22% of portfolio, HHI is elevated; "
-    "trimming to 15% would still capture upside while diversifying tail risk."
+    "trimming to 15% would still capture upside while diversifying tail risk.\n"
+    "CRITICAL: any open recommendation from the PRIOR RECOMMENDATIONS data that is "
+    "still relevant MUST appear here as an [ACTION] item — do not let it disappear "
+    "from the actionable section simply because it was mentioned in prose in section (3)."
 )
 
 _PROMPT_FORMATTING = (
@@ -1480,8 +1489,31 @@ _PROMPT_FORMATTING = (
     "All output must be plain text with Markdown bold (**text**) only. "
     "Use **bold** sparingly for headline figures. Be direct and concise. "
     "Never add disclaimers, caveats, or 'this is not financial advice' language. "
-    "The reader is the portfolio owner — treat them as an informed adult."
+    "The reader is the portfolio owner — treat them as an informed adult. "
+    "DIVERSIFICATION: the HHI measures position-count concentration across holdings — "
+    "it says nothing about factor risk. A portfolio with HHI 0.03 and Beta 1.9 concentrated "
+    "in one sector is not 'well diversified' — it has low position concentration but high "
+    "factor concentration. Never conflate the two; if Beta > 1.5 or a single sector exceeds "
+    "35% of NAV, acknowledge the factor risk even if HHI is low. "
+    "STATISTICAL CONFIDENCE: annualised metrics (Alpha, Sharpe, Sortino, Calmar) derived "
+    "from less than two years of history have wide confidence intervals — a single bull or "
+    "bear phase dominates. Never write that short-history metrics 'confirm', 'prove', or "
+    "'formally establish' outperformance. State the figure, note it is based on limited "
+    "history, and let the reader draw their own conclusion."
 )
+
+
+def _assert_analysis_complete(text: str) -> None:
+    """Raise if the analysis text appears truncated (last line doesn't end a sentence)."""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if not lines:
+        raise RuntimeError("Analysis is empty")
+    last = lines[-1]
+    if not re.search(r'[.!?"]$', last) and not last.startswith("[ACTION]") and not last.startswith("[IMPLICATION]"):
+        raise RuntimeError(
+            f"Analysis appears truncated — last line: {last[:80]!r}. "
+            "Aborting to avoid sending a broken email."
+        )
 
 
 def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None) -> str:
@@ -1495,7 +1527,7 @@ def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, co
     log.info("Calling Claude API for analysis (model: %s)…", CLAUDE_MODEL)
     response = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=3000,
+        max_tokens=5000,
         system=[{
             "type": "text",
             "text": system_prompt,
@@ -1504,10 +1536,16 @@ def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, co
         messages=[{"role": "user", "content": user_content}],
     )
     log.info(
-        "Claude analysis received (input tokens: %d, cached: %d)",
+        "Claude analysis received (input tokens: %d, cached: %d, stop_reason: %s)",
         response.usage.input_tokens,
         response.usage.cache_read_input_tokens or 0,
+        response.stop_reason,
     )
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError(
+            "Analysis truncated (stop_reason=max_tokens). "
+            "Aborting to avoid sending a broken email."
+        )
     return _extract_text_from_response(response)
 
 
@@ -1519,7 +1557,10 @@ def call_claude_headline(summary: dict, benchmarks: list[dict], metrics: dict) -
         "You write a single-sentence editorial headline for a fortnightly portfolio "
         "briefing, styled like the Financial Times. Requirements: max 20 words; MUST "
         "contain at least one specific number, percentage, or comparison; subtly "
-        "insightful; no filler. Output ONLY the sentence — no quotes, no preamble."
+        "insightful; no filler. Output ONLY the sentence — no quotes, no preamble. "
+        "CRITICAL: use the most recent and most adverse move as your frame — do NOT "
+        "choose the less alarming time window to soften a bad result. If the weekly "
+        "move is worse than the fortnight, lead with the weekly figure."
     )
 
     bench_lines = "\n".join(
@@ -1534,9 +1575,10 @@ def call_claude_headline(summary: dict, benchmarks: list[dict], metrics: dict) -
             f"Beta {metrics.get('beta', 0):.2f}"
         )
     context = (
-        f"Portfolio monthly: {summary['monthly_pct']:+.2f}%\n"
+        f"Portfolio weekly: {summary['weekly_pct']:+.2f}%\n"
+        f"Portfolio fortnight (monthly proxy): {summary['monthly_pct']:+.2f}%\n"
         f"Portfolio YTD: {summary['ytd_pct']:+.2f}%\n"
-        f"Total P&L: €{summary['total_pl_eur']:+,.0f} ({summary['total_pl_pct']:+.2f}%)\n"
+        f"Total P&L since inception: €{summary['total_pl_eur']:+,.0f} ({summary['total_pl_pct']:+.2f}%)\n"
         f"{bench_lines}\n"
         f"{metrics_line}"
     )
@@ -1759,6 +1801,12 @@ def _color(val: float) -> str:
 
 def _fmt(val: float) -> str:
     return f"{val:+.2f}%"
+
+
+def _eur_signed(val: float, decimals: int = 0) -> str:
+    """Format a signed euro amount with sign before the symbol: -€254, +€254."""
+    sign = "-" if val < 0 else "+"
+    return f"{sign}€{abs(val):,.{decimals}f}"
 
 
 def _markdown_to_html(text: str) -> str:
@@ -2198,7 +2246,7 @@ def build_html_email(
     </td>
     <td class="mast-col" style="width:50%;vertical-align:top">
       <div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};margin-bottom:8px">Fortnight P&amp;L</div>
-      <div class="mast-num" style="font-family:Georgia,serif;font-size:32px;color:{fortnight_color};font-variant-numeric:tabular-nums">€{fortnight_pl:+,.0f} <span class="mast-num-sub" style="font-size:18px;color:{TEXT_SECONDARY}">({fortnight_pct:+.2f}%)</span></div>
+      <div class="mast-num" style="font-family:Georgia,serif;font-size:32px;color:{fortnight_color};font-variant-numeric:tabular-nums">{_eur_signed(fortnight_pl)} <span class="mast-num-sub" style="font-size:18px;color:{TEXT_SECONDARY}">({fortnight_pct:+.2f}%)</span></div>
     </td>
   </tr></table>
   <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;border-top:1px solid rgba(255,255,255,0.15)">
@@ -2460,10 +2508,13 @@ def main() -> None:
 
         log.info("Calling Claude for analysis…")
         conviction = load_conviction()
-        analysis_raw = call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction, momentum_data, lookthrough_data)
+        current_issue = issue_number()
+        conviction_prior = {k: v for k, v in conviction.items() if v.get("report", 0) < current_issue}
+        analysis_raw = call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction_prior, momentum_data, lookthrough_data)
+        _assert_analysis_complete(analysis_raw)
         analysis_body, actionable_raw = split_analysis(analysis_raw)
         actionable_items = parse_actionable(actionable_raw)
-        save_conviction(conviction, actionable_items, positions, issue_number())
+        save_conviction(conviction, actionable_items, positions, current_issue)
 
         log.info("Calling Claude for headline…")
         try:
