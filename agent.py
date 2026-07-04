@@ -18,7 +18,7 @@ from collections.abc import Callable
 import sys
 import tempfile
 import traceback
-from datetime import date
+from datetime import date, datetime as dt
 from pathlib import Path
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
@@ -471,7 +471,7 @@ def _pie(ax, sizes: list[float], labels: list[str]) -> None:
 
 
 _HISTORY_PATH = Path("history.csv")
-_HISTORY_COLS = ("date", "issue", "total_value_eur", "sp500_close")
+_HISTORY_COLS = ("date", "issue", "total_value_eur", "sp500_close", "datetime", "source")
 
 
 def _extract_text_from_response(response: Any) -> str:
@@ -499,44 +499,54 @@ def _is_float(value: object | None) -> bool:
     return False
 
 
-def append_history(summary: dict, issue_num: int) -> None:
-    """Append one row to history.csv per calendar day (skips duplicate same-day runs)."""
+def append_history(summary: dict, issue_num: int, source: str = "scheduled") -> None:
+    """Append one row to history.csv per (date, source) pair."""
     today_str = date.today().isoformat()
-    write_header = not _HISTORY_PATH.exists()
+    now_str = dt.now().isoformat(timespec="seconds")
+    existing: list[dict] = []
+
     if _HISTORY_PATH.exists():
-        # Repair headerless or BOM-prefixed files (written by older code or tools like Excel).
-        # utf-8-sig strips BOM so the first-row comparison is reliable.
-        # We also rewrite BOM files to normalise them to clean UTF-8.
         has_bom = _HISTORY_PATH.read_bytes()[:3] == b"\xef\xbb\xbf"
         with open(_HISTORY_PATH, newline="", encoding="utf-8-sig") as fh:
-            first_row = next(csv.reader(fh), None)
-        bad_header = first_row is None or [c.strip() for c in first_row] != list(_HISTORY_COLS)
-        if bad_header or has_bom:
-            content = _HISTORY_PATH.read_text(encoding="utf-8-sig")
-            if bad_header:
-                content = ",".join(_HISTORY_COLS) + "\n" + content
-            _HISTORY_PATH.write_text(content, encoding="utf-8")
-            log.info("History: repaired header (missing=%s bom=%s).", bad_header, has_bom)
-        with open(_HISTORY_PATH, newline="", encoding="utf-8") as fh:
-            existing = list(csv.DictReader(fh))
-        if any(r.get("date") == today_str for r in existing):
-            log.info("History: entry for %s already exists — skipping.", today_str)
+            reader = csv.DictReader(fh)
+            existing = list(reader)
+            file_cols = [c.strip() for c in (reader.fieldnames or [])]
+
+        missing_cols = set(_HISTORY_COLS) - set(file_cols)
+        if has_bom or missing_cols:
+            # Migrate: rewrite with full schema; backfill old rows with sensible defaults.
+            for row in existing:
+                row.setdefault("datetime", row.get("date", ""))
+                row.setdefault("source", "scheduled")
+            with open(_HISTORY_PATH, "w", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=list(_HISTORY_COLS), extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(existing)
+            log.info("History: migrated schema (added: %s, bom=%s).", missing_cols, has_bom)
+
+        if any(r.get("date") == today_str and r.get("source", "scheduled") == source for r in existing):
+            log.info("History: %s entry for %s already exists — skipping.", source, today_str)
             return
+
     sp500_series = _hist_cache.get("^GSPC")
     if sp500_series is None or sp500_series.empty:
         log.warning("S&P 500 not in cache — history row will have sp500_close=0")
         sp500_close = 0.0
     else:
         sp500_close = float(sp500_series.iloc[-1])
+
     row = cast(
-        dict[Literal["date", "issue", "total_value_eur", "sp500_close"], Any],
+        dict[Literal["date", "issue", "total_value_eur", "sp500_close", "datetime", "source"], Any],
         {
             "date": today_str,
             "issue": issue_num,
             "total_value_eur": round(summary["total_value_eur"], 2),
             "sp500_close": round(sp500_close, 4),
+            "datetime": now_str,
+            "source": source,
         },
     )
+    write_header = not _HISTORY_PATH.exists()
     with open(_HISTORY_PATH, "a", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(_HISTORY_COLS))
         if write_header:
@@ -551,10 +561,13 @@ def generate_history_chart() -> str | None:
     rows: list[dict] = []
     with open(_HISTORY_PATH, newline="", encoding="utf-8-sig") as fh:
         rows = list(csv.DictReader(fh))
-    # Drop any stray non-data rows (e.g. duplicate header lines from BOM repair)
+    # Keep only valid scheduled rows — manual runs don't belong in the trend chart.
     rows = [
         r for r in rows
-        if r.get("date") and _is_float(r.get("total_value_eur")) and _is_float(r.get("sp500_close"))
+        if r.get("date")
+        and _is_float(r.get("total_value_eur"))
+        and _is_float(r.get("sp500_close"))
+        and r.get("source", "scheduled") == "scheduled"
     ]
     if len(rows) < 6:
         return None
@@ -1666,7 +1679,8 @@ def get_history_ytd(current_value: float) -> float | None:
         rows = list(csv.DictReader(fh))
     jan_rows = [
         r for r in rows
-        if r.get("date", "").startswith(f"{current_year}-01") and _is_float(r.get("total_value_eur"))
+        if r.get("date", "").startswith(f"{current_year}-01")
+        and _is_float(r.get("total_value_eur"))
     ]
     if not jan_rows:
         return None
@@ -2425,8 +2439,9 @@ def main() -> None:
                 _hist_cache["^GSPC"] = sp500
             except Exception:
                 pass
-            append_history(summary, issue_number())
-            log.info("History updated — total value EUR %.0f", summary["total_value_eur"])
+            _source = "scheduled" if os.environ.get("GITHUB_ACTIONS") == "true" else "manual"
+            append_history(summary, issue_number(), source=_source)
+            log.info("History updated — total value EUR %.0f (source=%s)", summary["total_value_eur"], _source)
         except Exception as exc:
             log.error("Data-only run failed: %s", exc)
             sys.exit(1)
@@ -2502,7 +2517,8 @@ def main() -> None:
         lookthrough_data = compute_lookthrough_exposure(positions)
 
         if not args.force:
-            append_history(summary, issue_number())
+            _source = "scheduled" if os.environ.get("GITHUB_ACTIONS") == "true" else "manual"
+            append_history(summary, issue_number(), source=_source)
         log.info("Generating charts…")
         charts = generate_charts(positions, summary, benchmarks)
 
