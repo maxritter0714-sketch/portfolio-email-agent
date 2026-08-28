@@ -1,68 +1,84 @@
-﻿"""Tests for pure functions in agent.py."""
+﻿"""Tests for pure functions across the agent modules."""
+import json
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
 from datetime import date as real_date
-from types import SimpleNamespace
-from unittest.mock import patch
 
-import agent
-from agent import (
-    issue_number,
-    is_second_saturday,
-    get_ticker_classification,
-    _matches_macro,
-    _first_token,
-    split_analysis,
+import market
+from claude_report import (
+    _assert_analysis_complete,
+    _value_vs_jan_line,
+    match_action_ticker,
     parse_actionable,
-    _markdown_to_html,
-    _emphasize_numbers,
+    save_conviction,
+    split_analysis,
+)
+from email_html import _emphasize_numbers, _eur_signed, _markdown_to_html, build_html_email
+from market import (
+    _FX_FALLBACKS,
+    _FX_PAIRS,
     _prepare_pie,
+    _to_eur_close,
+    _window_pct,
+    get_history_ytd,
+    get_ticker_classification,
+    is_send_saturday,
+    issue_number,
+    to_eur_rate,
+)
+from metrics import (
     _trailing,
-    _trailing_sharpe,
     _trailing_beta,
+    _trailing_sharpe,
     _trailing_vol,
-    compute_momentum_scores,
+    compute_advanced_metrics,
     compute_lookthrough_exposure,
+    compute_momentum_scores,
+    risk_free_rate,
+)
+from news import (
+    _extract_text_from_response,
+    _first_token,
+    _matches_macro,
+    _query_name_batches,
+    _tag_article_tickers,
 )
 
 
 # ── issue_number ──────────────────────────────────────────────────────────────
 
-def test_issue_number_jan_2025():
+def test_issue_number_epoch():
+    assert issue_number(real_date(2025, 1, 11)) == 1
+
+def test_issue_number_same_fortnight_off_week():
+    assert issue_number(real_date(2025, 1, 18)) == 1
+
+def test_issue_number_second_fortnight():
+    assert issue_number(real_date(2025, 1, 25)) == 2
+
+def test_issue_number_before_epoch_is_one():
     assert issue_number(real_date(2025, 1, 1)) == 1
 
-def test_issue_number_dec_2025():
-    assert issue_number(real_date(2025, 12, 1)) == 12
 
-def test_issue_number_jan_2026():
-    # Crosses year boundary
-    assert issue_number(real_date(2026, 1, 1)) == 13
+# ── is_send_saturday ──────────────────────────────────────────────────────────
 
+def test_is_send_saturday_epoch():
+    assert is_send_saturday(real_date(2025, 1, 11))
 
-# ── is_second_saturday ────────────────────────────────────────────────────────
-# Jan 2026: Jan 1 = Thursday → first Sat = Jan 3, second Sat = Jan 10
+def test_is_send_saturday_false_not_saturday():
+    assert not is_send_saturday(real_date(2025, 1, 12))  # Sunday
 
-def test_is_second_saturday_true():
-    with patch("agent.date") as mock_date:
-        mock_date.today.return_value = real_date(2026, 1, 10)
-        assert is_second_saturday()
+def test_is_send_saturday_false_off_week():
+    assert not is_send_saturday(real_date(2025, 1, 18))
 
-def test_is_second_saturday_false_not_saturday():
-    with patch("agent.date") as mock_date:
-        mock_date.today.return_value = real_date(2026, 1, 11)  # Sunday
-        assert not is_second_saturday()
+def test_is_send_saturday_two_weeks_later():
+    assert is_send_saturday(real_date(2025, 1, 25))
 
-def test_is_second_saturday_false_first_saturday():
-    with patch("agent.date") as mock_date:
-        mock_date.today.return_value = real_date(2026, 1, 3)
-        assert not is_second_saturday()
-
-def test_is_second_saturday_different_month_start():
-    # Feb 2026: Feb 1 = Sunday → second Sat = Feb 14
-    with patch("agent.date") as mock_date:
-        mock_date.today.return_value = real_date(2026, 2, 14)
-        assert is_second_saturday()
+def test_is_send_saturday_before_epoch():
+    assert not is_send_saturday(real_date(2025, 1, 4))  # Saturday before № 1
 
 
 # ── get_ticker_classification ─────────────────────────────────────────────────
@@ -122,6 +138,59 @@ def test_first_token_empty_string():
     assert _first_token("") == ""
 
 
+def test_query_name_batches_splits_when_over_budget():
+    names = [f"Company Number {i} Holdings PLC" for i in range(20)]
+    batches = _query_name_batches(names, max_name_chars=90)
+    assert len(batches) > 1
+    for clause in batches:
+        assert len(clause) <= 90
+    joined = " ".join(batches)
+    assert "Company Number 0 Holdings PLC" in joined
+    assert "Company Number 19 Holdings PLC" in joined
+
+
+def test_query_name_batches_skips_name_longer_than_budget():
+    huge = "X" * 80
+    batches = _query_name_batches([huge, "Nvidia"], max_name_chars=20)
+    assert batches == ['"Nvidia"']
+
+
+def test_tag_skips_generic_first_token_apple():
+    article = {"headline": "Apple pie brand hits the stock market", "description": ""}
+    positions = [{"ticker": "AAPL", "name": "Apple Inc."}]
+    assert _tag_article_tickers(article, positions) == []
+
+
+def test_tag_skips_generic_first_token_meta():
+    article = {"headline": "A meta analysis of inflation and the stock market", "description": ""}
+    positions = [{"ticker": "META", "name": "Meta Platforms Inc."}]
+    assert _tag_article_tickers(article, positions) == []
+
+
+def test_tag_meta_when_company_name_present():
+    article = {"headline": "Meta Platforms reports quarterly earnings", "description": ""}
+    positions = [{"ticker": "META", "name": "Meta Platforms Inc."}]
+    assert _tag_article_tickers(article, positions) == ["META"]
+
+
+def test_tag_nvidia_by_distinctive_first_token():
+    article = {"headline": "Nvidia raises full-year guidance", "description": ""}
+    positions = [{"ticker": "NVDA", "name": "NVIDIA Corporation"}]
+    assert _tag_article_tickers(article, positions) == ["NVDA"]
+
+
+def test_tag_by_ticker_symbol():
+    article = {"headline": "NVDA hits a record close", "description": ""}
+    positions = [{"ticker": "NVDA", "name": "NVIDIA Corporation"}]
+    assert _tag_article_tickers(article, positions) == ["NVDA"]
+
+
+def test_tag_by_ticker_root_when_suffix_present():
+    article = {"headline": "ASML ships more EUV tools", "description": ""}
+    positions = [{"ticker": "ASML.AS", "name": "ASML Holding NV"}]
+    assert _tag_article_tickers(article, positions) == ["ASML.AS"]
+
+
 # ── split_analysis ────────────────────────────────────────────────────────────
 
 SAMPLE_ANALYSIS = """\
@@ -152,11 +221,6 @@ def test_split_analysis_extracts_actionable_text():
     assert "[TRIM]" in actionable
 
 
-def test_extract_text_from_response_uses_text_attribute():
-    response = SimpleNamespace(content=[SimpleNamespace(text="hello world")])
-    assert agent._extract_text_from_response(response) == "hello world"
-
-
 # ── parse_actionable ──────────────────────────────────────────────────────────
 
 def test_parse_actionable_parses_title_and_detail():
@@ -181,6 +245,51 @@ def test_parse_actionable_empty():
 def test_parse_actionable_case_insensitive():
     items = parse_actionable("[trim] Lower weight — Too concentrated.")
     assert items[0]["action"] == "TRIM"
+
+
+_POS_NVDA = {"ticker": "NVDA", "name": "NVIDIA Corporation", "price_eur": 120.0}
+_POS_AMD = {"ticker": "AMD", "name": "Advanced Micro Devices", "price_eur": 90.0}
+
+
+def test_match_action_ticker_by_symbol():
+    item = {"title": "Reduce NVDA", "detail": "Too large."}
+    assert match_action_ticker(item, [_POS_NVDA, _POS_AMD]) == "NVDA"
+
+
+def test_match_action_ticker_by_company_name():
+    item = {"title": "Reduce Nvidia", "detail": "Concentration too high."}
+    assert match_action_ticker(item, [_POS_NVDA, _POS_AMD]) == "NVDA"
+
+
+def test_match_action_ticker_name_in_detail_only():
+    item = {"title": "Trim the winner", "detail": "Nvidia still 22% of the book."}
+    assert match_action_ticker(item, [_POS_NVDA, _POS_AMD]) == "NVDA"
+
+
+def test_match_action_ticker_ambiguous_names_returns_none():
+    item = {"title": "Reduce Nvidia and AMD", "detail": ""}
+    assert match_action_ticker(item, [_POS_NVDA, _POS_AMD]) is None
+
+
+def test_match_action_ticker_ignores_short_name_token():
+    sap = {"ticker": "SAP.DE", "name": "SAP SE", "price_eur": 180.0}
+    item = {"title": "Review the software names", "detail": ""}
+    assert match_action_ticker(item, [sap]) is None
+
+
+def test_save_conviction_writes_name_match(tmp_path, monkeypatch):
+    path = tmp_path / "conviction.json"
+    monkeypatch.setattr("claude_report._CONVICTION_PATH", path)
+    conviction: dict = {}
+    save_conviction(
+        conviction,
+        [{"action": "TRIM", "title": "Reduce Nvidia", "detail": "Too big."}],
+        [_POS_NVDA],
+        issue_num=12,
+    )
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["NVDA"]["action"] == "TRIM"
+    assert saved["NVDA"]["report"] == 12
 
 
 # ── _markdown_to_html ─────────────────────────────────────────────────────────
@@ -303,7 +412,7 @@ def test_compute_momentum_scores_happy_path(monkeypatch):
     vals[length - 63] = 150.0
     vals[length - 21] = 180.0
     vals[-1] = 200.0
-    monkeypatch.setattr(agent, "_hist_cache", {"AAA": pd.Series(vals)})
+    monkeypatch.setattr(market, "_hist_cache", {"AAA": pd.Series(vals)})
 
     result = compute_momentum_scores([{"ticker": "AAA", "name": "Alpha Co"}])
 
@@ -317,19 +426,19 @@ def test_compute_momentum_scores_happy_path(monkeypatch):
     assert d["score"] == pytest.approx(expected_score)
 
 def test_compute_momentum_scores_skips_missing_from_cache(monkeypatch):
-    monkeypatch.setattr(agent, "_hist_cache", {})
+    monkeypatch.setattr(market, "_hist_cache", {})
     result = compute_momentum_scores([{"ticker": "ZZZ", "name": "Zeta"}])
     assert result == []
 
 def test_compute_momentum_scores_skips_short_history(monkeypatch):
     short_series = pd.Series(np.linspace(100, 110, 50))  # < 63 days
-    monkeypatch.setattr(agent, "_hist_cache", {"AAA": short_series})
+    monkeypatch.setattr(market, "_hist_cache", {"AAA": short_series})
     result = compute_momentum_scores([{"ticker": "AAA", "name": "Alpha"}])
     assert result == []
 
 def test_compute_momentum_scores_r6m_falls_back_to_r3m_when_under_126_days(monkeypatch):
     vals = np.linspace(100, 150, 90)  # >= 63, < 126
-    monkeypatch.setattr(agent, "_hist_cache", {"AAA": pd.Series(vals)})
+    monkeypatch.setattr(market, "_hist_cache", {"AAA": pd.Series(vals)})
     result = compute_momentum_scores([{"ticker": "AAA", "name": "Alpha"}])
     d = result[0]
     assert d["r6m"] == pytest.approx(d["r3m"])
@@ -348,7 +457,7 @@ def test_compute_momentum_scores_quartiles_span_1_to_4_and_sort_descending(monke
     growths = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
     cache = {f"T{i}": make_series(g) for i, g in enumerate(growths)}
     positions = [{"ticker": f"T{i}", "name": f"Ticker {i}"} for i in range(8)]
-    monkeypatch.setattr(agent, "_hist_cache", cache)
+    monkeypatch.setattr(market, "_hist_cache", cache)
 
     result = compute_momentum_scores(positions)
 
@@ -419,3 +528,270 @@ def test_lookthrough_sorted_descending_by_hidden_eur():
     ]
     result = compute_lookthrough_exposure(positions)
     assert [d["ticker"] for d in result] == ["BIG", "SMALL"]
+
+
+# ── to_eur_rate / FX coverage ────────────────────────────────────────────────
+
+def test_fx_pairs_include_nordic_and_cad():
+    for code in ("DKK", "SEK", "NOK", "CAD", "AUD"):
+        assert code in _FX_PAIRS
+        assert code in _FX_FALLBACKS
+
+def test_to_eur_rate_known_currency_no_fallback():
+    rates = {"EUR": 1.0, "USD": 0.9, "DKK": 0.13}
+    rate, used_fallback = to_eur_rate("DKK", rates)
+    assert rate == pytest.approx(0.13)
+    assert used_fallback is False
+
+def test_to_eur_rate_unknown_currency_uses_usd_fallback():
+    rates = {"EUR": 1.0, "USD": 0.9}
+    rate, used_fallback = to_eur_rate("XYZ", rates)
+    assert rate == pytest.approx(0.9)
+    assert used_fallback is True
+
+def test_to_eur_rate_gbx_alias():
+    rates = {"EUR": 1.0, "USD": 0.9, "GBp": 0.0117, "GBX": 0.0117}
+    rate, used_fallback = to_eur_rate("GBX", rates)
+    assert rate == pytest.approx(0.0117)
+    assert used_fallback is False
+
+
+def _minimal_email(**kwargs) -> str:
+    defaults = dict(
+        positions=[],
+        summary=dict(
+            total_value_eur=10_000.0,
+            fortnight_pct=1.0,
+            monthly_pct=2.0,
+            weekly_pct=0.5,
+            ytd_pct=8.0,
+            portfolio_yield_pct=1.2,
+        ),
+        benchmarks=[],
+        port_news=[],
+        gen_news=[],
+        analysis_body="## (1) Summary\nSteady.",
+        actionable_items=[],
+        headline="Up 1% this fortnight",
+        chart_cids={},
+        metrics={},
+        issue_num=1,
+    )
+    defaults.update(kwargs)
+    return build_html_email(**defaults)
+
+def test_unknown_fx_appears_in_footer_notes():
+    html_out = _minimal_email(
+        unknown_fx=[{"ticker": "NOVOB.CO", "name": "Novo", "currency": "DKK"}],
+    )
+    assert "Unknown FX converted via USD fallback: NOVOB.CO (DKK)." in html_out
+
+def test_skipped_tickers_appear_in_footer_notes():
+    html_out = _minimal_email(
+        skipped=[{"ticker": "NOPE", "name": "Nope Inc", "reason": "404"}],
+    )
+    assert "Omitted (no price data): NOPE." in html_out
+
+def test_actionable_title_and_detail_are_html_escaped():
+    html_out = _minimal_email(
+        actionable_items=[{
+            "action": "TRIM",
+            "title": "<script>alert(1)</script>",
+            "detail": "Foo & Bar",
+        }],
+    )
+    assert "<script>" not in html_out
+    assert "&lt;script&gt;" in html_out
+    assert "Foo &amp; Bar" in html_out
+
+
+def test_masthead_keeps_price_ytd_and_omits_vs_january_when_missing():
+    html_out = _minimal_email()
+    assert ">YTD<" in html_out or ">YTD</div>" in html_out
+    assert "+8.00%" in html_out
+    assert "Vs January" not in html_out
+    assert "Includes cash in/out" not in html_out
+
+
+def test_masthead_shows_vs_january_beside_price_ytd():
+    html_out = _minimal_email(
+        summary=dict(
+            total_value_eur=10_000.0,
+            fortnight_pct=1.0,
+            monthly_pct=2.0,
+            weekly_pct=0.5,
+            ytd_pct=8.0,
+            value_vs_jan_pct=20.0,
+            portfolio_yield_pct=1.2,
+        ),
+    )
+    assert "+8.00%" in html_out
+    assert "+20.00%" in html_out
+    assert "Vs January" in html_out
+    assert "Includes cash in/out" in html_out
+
+
+def test_value_vs_jan_line_empty_when_missing():
+    assert _value_vs_jan_line({"ytd_pct": 8.0}) == ""
+
+
+def test_value_vs_jan_line_warns_not_twr():
+    line = _value_vs_jan_line({"value_vs_jan_pct": 20.0})
+    assert "+20.00%" in line
+    assert "not a time-weighted return" in line
+
+
+def test_get_history_ytd_uses_first_january_row(tmp_path, monkeypatch):
+    class FakeDate(real_date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 8, 27)
+
+    hist = tmp_path / "history.csv"
+    hist.write_text(
+        "date,issue,total_value_eur,sp500_close\n"
+        "2026-01-04,1,100000,5000\n"
+        "2026-01-11,1,101000,5010\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
+    monkeypatch.setattr(market, "date", FakeDate)
+    assert get_history_ytd(120_000.0) == pytest.approx(20.0)
+
+
+def test_get_history_ytd_none_without_january(tmp_path, monkeypatch):
+    class FakeDate(real_date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 8, 27)
+
+    hist = tmp_path / "history.csv"
+    hist.write_text(
+        "date,issue,total_value_eur,sp500_close\n"
+        "2026-02-07,3,110000,5100\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
+    monkeypatch.setattr(market, "date", FakeDate)
+    assert get_history_ytd(120_000.0) is None
+
+
+# ── EUR conversion for beta / alpha ───────────────────────────────────────────
+
+def test_to_eur_close_leaves_eur_unchanged():
+    idx = pd.bdate_range("2025-01-02", periods=3)
+    native = pd.Series([10.0, 11.0, 12.0], index=idx)
+    out = _to_eur_close(native, "EUR", {"EUR": 1.0})
+    assert list(out) == [10.0, 11.0, 12.0]
+
+
+def test_to_eur_close_usd_uses_daily_fx(monkeypatch):
+    idx = pd.bdate_range("2025-01-02", periods=3)
+    close = pd.Series([100.0, 100.0, 100.0], index=idx)
+    fx = pd.Series([0.8, 0.9, 1.0], index=idx)
+    monkeypatch.setattr(market, "_fx_hist_cache", {"USD": fx})
+    out = _to_eur_close(close, "USD", {"USD": 0.85})
+    assert list(out) == pytest.approx([80.0, 90.0, 100.0])
+
+
+def test_to_eur_close_gbx_converts_pence_then_gbp_fx(monkeypatch):
+    idx = pd.bdate_range("2025-01-02", periods=2)
+    close = pd.Series([1000.0, 1100.0], index=idx)
+    fx = pd.Series([1.2, 1.2], index=idx)
+    monkeypatch.setattr(market, "_fx_hist_cache", {"GBP": fx})
+    out = _to_eur_close(close, "GBX", {"GBp": 0.012})
+    assert list(out) == pytest.approx([12.0, 13.2])
+
+
+def test_beta_near_zero_when_usd_holding_is_flat_in_eur(monkeypatch):
+    n = 80
+    idx = pd.bdate_range("2025-01-02", periods=n)
+    fx = pd.Series(np.linspace(0.8, 1.2, n), index=idx)
+    usd_stock = 100.0 / fx
+    spx = pd.Series(100.0, index=idx)
+    monkeypatch.setattr(market, "_fx_hist_cache", {"USD": fx})
+    monkeypatch.setattr(market, "_hist_cache", {"AAA": usd_stock, "^GSPC": spx})
+    positions = [{
+        "ticker": "AAA", "name": "Alpha", "value_eur": 1000.0,
+        "pl_pct": 1.0, "currency": "USD",
+    }]
+    result = compute_advanced_metrics(positions, {"USD": 1.0, "EUR": 1.0})
+    assert result["beta"] == pytest.approx(0.0, abs=0.05)
+
+
+def test_metrics_eur_benchmark_note_in_footer():
+    html_out = _minimal_email(metrics={"sharpe": 1.0, "beta": 1.0, "alpha": 0.0})
+    assert "S&P 500 in euro terms" in html_out
+    assert "euro returns" in html_out
+    assert "Above cost" in html_out
+
+
+def test_window_pct_follows_daily_fx_when_usd_price_is_flat(monkeypatch):
+    idx = pd.bdate_range("2025-01-02", periods=8)
+    usd = pd.Series(100.0, index=idx)
+    fx = pd.Series([0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 1.0], index=idx)
+    monkeypatch.setattr(market, "_fx_hist_cache", {"USD": fx})
+    eur = _to_eur_close(usd, "USD", {"USD": 0.9})
+    weekly = _window_pct(eur, 6)
+    assert weekly == pytest.approx(25.0)
+
+
+def test_risk_free_rate_default(monkeypatch):
+    monkeypatch.delenv("RISK_FREE_RATE", raising=False)
+    assert risk_free_rate() == pytest.approx(0.035)
+
+
+def test_risk_free_rate_from_env(monkeypatch):
+    monkeypatch.setenv("RISK_FREE_RATE", "0.04")
+    assert risk_free_rate() == pytest.approx(0.04)
+
+
+def test_risk_free_rate_invalid_falls_back(monkeypatch):
+    monkeypatch.setenv("RISK_FREE_RATE", "nope")
+    assert risk_free_rate() == pytest.approx(0.035)
+
+
+# ── _extract_text_from_response ───────────────────────────────────────────────
+
+def test_extract_text_from_response_uses_text_attribute():
+    response = SimpleNamespace(content=[SimpleNamespace(text="hello world")])
+    assert _extract_text_from_response(response) == "hello world"
+
+
+def test_extract_text_from_response_empty_content_returns_empty_string():
+    response = SimpleNamespace(content=[])
+    assert _extract_text_from_response(response) == ""
+
+
+# ── _eur_signed ────────────────────────────────────────────────────────────────
+
+def test_eur_signed_negative_sign_before_symbol():
+    assert _eur_signed(-254.0) == "-€254"
+
+
+def test_eur_signed_positive_sign_before_symbol():
+    assert _eur_signed(254.0) == "+€254"
+
+
+def test_eur_signed_zero_is_positive():
+    assert _eur_signed(0.0) == "+€0"
+
+
+# ── _assert_analysis_complete ───────────────────────────────────────────────────
+
+def test_assert_analysis_complete_accepts_sentence_ending_in_period():
+    _assert_analysis_complete("This is a complete sentence.")
+
+
+def test_assert_analysis_complete_accepts_action_prefixed_last_line():
+    _assert_analysis_complete("Some prose.\n[ACTION] Reduce NVDA — Too concentrated.")
+
+
+def test_assert_analysis_complete_raises_on_truncated_last_line():
+    with pytest.raises(RuntimeError, match="truncated"):
+        _assert_analysis_complete("This sentence just cuts off mid")
+
+
+def test_assert_analysis_complete_raises_on_empty_text():
+    with pytest.raises(RuntimeError, match="empty"):
+        _assert_analysis_complete("   ")
