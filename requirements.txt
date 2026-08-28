@@ -1,8 +1,9 @@
-yfinance
-anthropic
-newsapi-python
-python-dotenv
-requests
-matplotlib
-numpy
-scipy
+yfinance==1.2.1
+anthropic==0.94.0
+newsapi-python==0.2.7
+python-dotenv==1.2.1
+requests==2.32.5
+matplotlib==3.10.8
+numpy==2.4.4
+pandas==3.0.2
+pytest==9.1.0

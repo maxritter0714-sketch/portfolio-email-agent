@@ -21,7 +21,7 @@ jobs:
       - name: Checkout data repo
         uses: actions/checkout@v4
         with:
-          repository: maxritter0714-sketch/portfolio-agent-data
+          repository: ${{ vars.PORTFOLIO_DATA_REPO || 'maxritter0714-sketch/portfolio-agent-data' }}
           token: ${{ secrets.DATA_REPO_TOKEN }}
           path: _data
 
@@ -42,6 +42,8 @@ jobs:
         run: pip install -r requirements.txt --quiet
 
       - name: Convert Finanzfluss export to portfolio.csv
+        env:
+          OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
         run: python import_portfolio.py --input finanzfluss_export.csv
 
       - name: Collect weekly data point
@@ -49,7 +51,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python agent.py --data-only
 
-      - name: Run full report (second Saturday only, or forced)
+      - name: Run full report (every other Saturday, or forced)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}

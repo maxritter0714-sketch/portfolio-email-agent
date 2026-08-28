@@ -14,9 +14,9 @@ ISIN -> Yahoo Finance ticker resolution (in priority order):
 Set OPENFIGI_API_KEY in .env for higher rate limits (250 req/min vs 25).
 
 Usage:
-    python import_portfolio.py                        # Finanzfluss defaults
-    python import_portfolio.py --input my.csv --output portfolio.csv
-    python import_portfolio.py --quiet
+    python import_portfolio.py --input my-export.csv
+    python import_portfolio.py --input my-export.csv --output portfolio.csv
+    python import_portfolio.py --input my-export.csv --quiet
 """
 
 import argparse
@@ -244,7 +244,7 @@ def read_export_csv(filepath: str) -> list[dict]:
 # -- Main conversion -----------------------------------------------------------
 
 def convert(
-    input_path: str = "investments.csv",
+    input_path: str,
     output_path: str = "portfolio.csv",
     cfg: ExportConfig = FINANZFLUSS,
     verbose: bool = True,
@@ -340,8 +340,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--input",
-        default="investments.csv",
-        help="Path to the export CSV (default: investments.csv)",
+        required=True,
+        help="Path to the portfolio-app export CSV",
     )
     parser.add_argument(
         "--output",
