@@ -1,11 +1,11 @@
 ﻿# Portfolio Email Agent
 
-Sends you a polished HTML portfolio report every **second Saturday of the month**.  
+Sends you a polished HTML portfolio report every **other Saturday**.  
 The report includes live prices, P&L, benchmark comparison, curated news, and a four-section AI analysis from Claude.
 
 > **Heads up:** This project was built for personal use and may require some adaptation before it works out of the box for you. In particular:
 > - **ISIN → ticker overrides** live in `isin_map.json` (gitignored, not included). Copy `isin_map.json.example` to get started — most ISINs are resolved automatically via OpenFIGI
-> - The **sector and region classification** in `agent.py` is resolved dynamically from yfinance — no hardcoded maps to maintain
+> - The **sector and region classification** in `market.py` is resolved dynamically from yfinance — no hardcoded maps to maintain
 > - The **Finanzfluss import script** expects column names from a Finanzfluss export — other brokers will need column name adjustments
 > - The agent is built around **EUR as base currency**
 
@@ -99,7 +99,7 @@ Build the report locally without sending anything, using `--preview` (writes `pr
 python agent.py --preview
 ```
 
-Once that looks right, run with `--force` to bypass the second-Saturday check and send a real email:
+Once that looks right, run with `--force` to bypass the fortnight schedule check and send a real email:
 
 ```bash
 python agent.py --force
@@ -120,9 +120,10 @@ The cleanest setup — runs in the cloud, no local machine required, secrets sto
 3. Add secrets to your public repo under **Settings → Secrets and variables → Actions**:
    - `DATA_REPO_TOKEN` — the PAT from step 2
    - `ANTHROPIC_API_KEY`, `NEWS_API_KEY`, `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `RECIPIENT_EMAIL`
-4. The included `.github/workflows/report.yml` runs every Saturday at 6am UTC automatically
+4. If your private data repo is not `maxritter0714-sketch/portfolio-agent-data`, add an Actions **variable** `PORTFOLIO_DATA_REPO` set to `owner/name`.
+5. The included `.github/workflows/report.yml` runs every Saturday at 6am UTC automatically
 
-The workflow collects a weekly data point on every Saturday and sends the full email report on second Saturdays only. `history.csv` and `conviction.json` are pushed back to the private repo after each run so they persist between executions.
+The workflow collects a weekly data point on every Saturday and sends the full email report every other Saturday. `history.csv` and `conviction.json` are pushed back to the private repo after each run so they persist between executions.
 
 To trigger a test run: **Actions → Portfolio Report → Run workflow → tick Force full report**.
 
@@ -134,7 +135,7 @@ Open your crontab:
 crontab -e
 ```
 
-Add this line to run at 08:00 on every Saturday (the script self-checks for the second Saturday):
+Add this line to run at 08:00 on every Saturday (the script self-checks for a fortnight send Saturday):
 
 ```cron
 0 8 * * 6 cd /path/to/portfolioAgent && /usr/bin/python3 agent.py >> agent.log 2>&1
