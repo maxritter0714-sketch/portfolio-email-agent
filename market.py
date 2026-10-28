@@ -488,11 +488,14 @@ def fetch_portfolio_data(
     return positions, summary, unknown_fx, skipped
 
 
-def fetch_benchmarks() -> list[dict]:
+def fetch_benchmarks(fx_rates: dict[str, float]) -> list[dict]:
+    """Benchmark returns in EUR, so they compare like-for-like with the portfolio."""
     results = []
     for symbol, label in BENCHMARKS:
         try:
-            _, weekly, fortnight, monthly, ytd, _cur, _info, _sw, _hw, _div = get_price_changes(symbol)
+            _, weekly, fortnight, monthly, ytd, _cur, _info, _sw, _hw, _div = get_price_changes(
+                symbol, fx_rates=fx_rates, convert_to_eur=True,
+            )
             results.append(
                 dict(symbol=symbol, name=label, weekly_pct=weekly,
                      fortnight_pct=fortnight, monthly_pct=monthly, ytd_pct=ytd)

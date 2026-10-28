@@ -726,6 +726,20 @@ def test_metrics_eur_benchmark_note_in_footer():
     assert "Above cost" in html_out
 
 
+def test_fetch_benchmarks_requests_eur_returns(monkeypatch):
+    calls = []
+
+    def fake_price_changes(symbol, fx_rates=None, convert_to_eur=False):
+        calls.append((symbol, fx_rates, convert_to_eur))
+        return 0.0, 1.0, 2.0, 3.0, 4.0, "USD", {}, {}, {}, 0.0
+
+    monkeypatch.setattr(market, "get_price_changes", fake_price_changes)
+    fx = {"EUR": 1.0, "USD": 0.9}
+    result = market.fetch_benchmarks(fx)
+    assert len(result) == len(market.BENCHMARKS)
+    assert all(rates is fx and to_eur for _, rates, to_eur in calls)
+
+
 def test_window_pct_follows_daily_fx_when_usd_price_is_flat(monkeypatch):
     idx = pd.bdate_range("2025-01-02", periods=8)
     usd = pd.Series(100.0, index=idx)

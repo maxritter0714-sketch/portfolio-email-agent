@@ -534,8 +534,7 @@ def build_html_email(
     skipped = skipped or []
     notes_parts: list[str] = []
     notes_parts.append(
-        "Holding 1W/2W/1M/YTD figures are euro returns. "
-        "Index comparison rows are native listings."
+        "Holding and index 1W/2W/1M/YTD figures are euro returns."
     )
     if metrics:
         notes_parts.append(

@@ -218,7 +218,7 @@ def main() -> None:
             sys.exit(1)
 
         log.info("Fetching benchmark data…")
-        benchmarks = fetch_benchmarks()
+        benchmarks = fetch_benchmarks(fx_rates)
 
         log.info("Fetching portfolio news…")
         port_news = fetch_portfolio_news(positions)

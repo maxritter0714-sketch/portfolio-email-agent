@@ -232,9 +232,9 @@ _PROMPT_FORMATTING = (
     "'formally establish' outperformance. State the figure, note it is based on limited "
     "history, and let the reader draw their own conclusion. "
     "YTD for holdings and the portfolio masthead is a weighted euro price return of "
-    "current names this calendar year. Benchmark 1W/2W/1M/YTD figures are native index "
-    "listings (USD S&P, etc.), not euro-converted — do not mix them with portfolio YTD "
-    "as if they were the same currency. If a book-value-vs-January figure is present, "
+    "current names this calendar year. Benchmark 1W/2W/1M/YTD figures are also euro "
+    "returns (index converted at daily EUR FX), so portfolio and benchmark figures "
+    "compare like-for-like. If a book-value-vs-January figure is present, "
     "it includes deposits and withdrawals and is not a time-weighted return; do not "
     "call it YTD performance."
 )
