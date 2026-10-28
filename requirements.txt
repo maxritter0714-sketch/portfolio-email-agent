@@ -4,6 +4,6 @@ newsapi-python==0.2.7
 python-dotenv==1.2.4
 requests==2.34.2
 matplotlib==3.11.2
-numpy==2.5.4
+numpy==2.4.6
 pandas==3.1.0
 pytest==9.2.0
