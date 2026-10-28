@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: Checkout portfolio agent
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout data repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ vars.PORTFOLIO_DATA_REPO || 'maxritter0714-sketch/portfolio-agent-data' }}
           token: ${{ secrets.DATA_REPO_TOKEN }}
@@ -34,7 +34,7 @@ jobs:
           cp _data/targets.json . 2>/dev/null || true
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: pip
