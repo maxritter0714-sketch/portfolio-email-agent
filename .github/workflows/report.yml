@@ -67,6 +67,8 @@ jobs:
           fi
 
       - name: Push updated data back to data repo
+        # Runs even if the report step failed, so the weekly data point isn't lost.
+        if: ${{ !cancelled() }}
         run: |
           cp history.csv _data/ 2>/dev/null || true
           cp conviction.json _data/ 2>/dev/null || true
