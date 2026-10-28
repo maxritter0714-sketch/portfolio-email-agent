@@ -31,6 +31,7 @@ jobs:
           cp _data/history.csv . 2>/dev/null || true
           cp _data/conviction.json . 2>/dev/null || true
           cp _data/isin_map.json . 2>/dev/null || true
+          cp _data/targets.json . 2>/dev/null || true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -44,7 +45,7 @@ jobs:
       - name: Convert Finanzfluss export to portfolio.csv
         env:
           OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
-        run: python import_portfolio.py --input finanzfluss_export.csv
+        run: python import_portfolio.py --input finanzfluss_export.csv --allow-missing
 
       - name: Collect weekly data point
         env:
@@ -59,6 +60,7 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
           OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
+          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL }}
         run: |
           if [ "${{ inputs.force }}" = "true" ]; then
             python agent.py --force

@@ -25,6 +25,7 @@ venv/
 # Claude Code internal
 .claude/
 isin_map.json
+targets.json
 conviction.json
 history.csv
 

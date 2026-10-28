@@ -25,6 +25,7 @@ from claude_report import (
     _assert_analysis_complete,
     call_claude,
     call_claude_headline,
+    conviction_scorecard,
     load_conviction,
     parse_actionable,
     save_conviction,
@@ -34,14 +35,19 @@ from email_html import build_html_email
 from market import (
     _hist_cache,
     append_history,
+    compute_allocation_drift,
     fetch_benchmarks,
     fetch_portfolio_data,
+    fetch_upcoming_events,
     generate_charts,
     get_fx_rates,
     get_history_ytd,
     is_send_saturday,
     issue_number,
     load_portfolio,
+    load_targets,
+    next_portfolio_index,
+    recommendation_ref_prices,
 )
 from metrics import (
     compute_advanced_metrics,
@@ -117,6 +123,21 @@ def send_email(html: str, chart_files: dict[str, str]) -> None:
                 pass
 
 
+# ── History ───────────────────────────────────────────────────────────────────
+def record_history(positions: list[dict], summary: dict, fx_rates: dict[str, float]) -> None:
+    """Append today's data point, including the deposit-free portfolio index."""
+    source = "scheduled" if os.environ.get("GITHUB_ACTIONS") == "true" else "manual"
+    port_index = next_portfolio_index(positions, fx_rates)
+    sp500 = _hist_cache.get("^GSPC")
+    sp500_eur = None
+    if sp500 is not None and not sp500.empty:
+        sp500_eur = float(sp500.iloc[-1]) * fx_rates.get("USD", 0.0) or None
+    append_history(summary, issue_number(), source=source,
+                   port_index=port_index, sp500_eur=sp500_eur)
+    log.info("History updated — total value EUR %.0f, index %.2f (source=%s)",
+             summary["total_value_eur"], port_index, source)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -144,7 +165,7 @@ def main() -> None:
         try:
             rows = load_portfolio("portfolio.csv")
             fx_rates = get_fx_rates()
-            _, summary, unknown_fx, skipped = fetch_portfolio_data(rows, fx_rates)
+            positions, summary, unknown_fx, skipped = fetch_portfolio_data(rows, fx_rates)
             if skipped:
                 log.warning(
                     "Omitted %d ticker(s): %s",
@@ -160,9 +181,7 @@ def main() -> None:
                 _hist_cache["^GSPC"] = sp500
             except Exception:
                 pass
-            _source = "scheduled" if os.environ.get("GITHUB_ACTIONS") == "true" else "manual"
-            append_history(summary, issue_number(), source=_source)
-            log.info("History updated — total value EUR %.0f (source=%s)", summary["total_value_eur"], _source)
+            record_history(positions, summary, fx_rates)
         except Exception as exc:
             log.error("Data-only run failed: %s", exc)
             sys.exit(1)
@@ -218,9 +237,14 @@ def main() -> None:
         log.info("Computing look-through exposure…")
         lookthrough_data = compute_lookthrough_exposure(positions)
 
+        log.info("Fetching upcoming events…")
+        events = fetch_upcoming_events(positions)
+
+        targets = load_targets()
+        allocation = compute_allocation_drift(positions, targets) if targets else []
+
         if not args.force:
-            _source = "scheduled" if os.environ.get("GITHUB_ACTIONS") == "true" else "manual"
-            append_history(summary, issue_number(), source=_source)
+            record_history(positions, summary, fx_rates)
         log.info("Generating charts…")
         charts = generate_charts(positions, summary, benchmarks)
 
@@ -228,11 +252,19 @@ def main() -> None:
         conviction = load_conviction()
         current_issue = issue_number()
         conviction_prior = {k: v for k, v in conviction.items() if v.get("report", 0) < current_issue}
-        analysis_raw = call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction_prior, momentum_data, lookthrough_data)
+        ref_prices = recommendation_ref_prices(conviction_prior, positions, fx_rates)
+        analysis_raw = call_claude(
+            positions, summary, benchmarks, port_news, gen_news, metrics,
+            conviction_prior, momentum_data, lookthrough_data, events, allocation, ref_prices,
+        )
         _assert_analysis_complete(analysis_raw)
         analysis_body, actionable_raw = split_analysis(analysis_raw)
         actionable_items = parse_actionable(actionable_raw)
-        save_conviction(conviction, actionable_items, positions, current_issue)
+        scorecard = conviction_scorecard(conviction_prior, positions, ref_prices)
+        if args.preview:
+            log.info("Preview — conviction.json left unchanged")
+        else:
+            save_conviction(conviction, actionable_items, positions, current_issue)
 
         log.info("Calling Claude for headline…")
         try:
@@ -252,6 +284,9 @@ def main() -> None:
             chart_cids, metrics, current_issue,
             unknown_fx=unknown_fx,
             skipped=skipped,
+            allocation=allocation,
+            events=events,
+            scorecard=scorecard,
         )
 
         if args.preview:

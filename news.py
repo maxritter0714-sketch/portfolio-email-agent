@@ -245,7 +245,7 @@ def filter_news_by_relevance(
 
         client = anthropic.Anthropic()
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-haiku-4-5",
             max_tokens=4096,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
@@ -395,7 +395,7 @@ def _select_world_news(articles: list[dict], max_items: int = 7) -> list[dict]:
     try:
         client = anthropic.Anthropic()
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-haiku-4-5",
             max_tokens=256,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],

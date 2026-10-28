@@ -267,6 +267,128 @@ def _emphasize_numbers(text: str) -> str:
     return re.sub(r"[+-]?\d+(?:[.,]\d+)?(?:%|\s?(?:points?|pts|bps|ppt))?", repl, text)
 
 
+_ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+
+
+def _small_td(content: str, align: str = "left", color: str = TEXT_PRIMARY) -> str:
+    return (
+        f'<td style="padding:10px 4px;border-bottom:1px solid {RULE_FAINT};'
+        f'font-family:Arial,Helvetica,sans-serif;font-size:13px;text-align:{align};'
+        f'font-variant-numeric:tabular-nums;color:{color}">{content}</td>'
+    )
+
+
+def _small_th(label: str, align: str = "left") -> str:
+    return (
+        f'<th style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
+        f'text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};'
+        f'text-align:{align};padding:8px 4px;border-bottom:1px solid {TEXT_PRIMARY};'
+        f'font-weight:600">{label}</th>'
+    )
+
+
+def _allocation_html(allocation: list[dict]) -> str:
+    rows = ""
+    for r in allocation:
+        target = f'{r["target_pct"]:.1f}%' if r["target_pct"] is not None else "&ndash;"
+        if r["drift_pct"] is None:
+            drift, drift_color = "&ndash;", TEXT_SECONDARY
+        else:
+            drift = f'{r["drift_pct"]:+.1f} pts'
+            drift_color = BURGUNDY if r["off_target"] else TEXT_PRIMARY
+        rows += (
+            "<tr>"
+            + _small_td(html.escape(r["name"]))
+            + _small_td(f'{r["actual_pct"]:.1f}%', "right")
+            + _small_td(target, "right")
+            + _small_td(drift, "right", drift_color)
+            + "</tr>"
+        )
+    return (
+        '<table width="100%" cellpadding="0" cellspacing="0"><thead><tr>'
+        + _small_th("Group") + _small_th("Actual", "right")
+        + _small_th("Target", "right") + _small_th("Drift", "right")
+        + f"</tr></thead><tbody>{rows}</tbody></table>"
+    )
+
+
+def _events_html(events: list[dict]) -> str:
+    rows = ""
+    for e in events:
+        rows += (
+            "<tr>"
+            + _small_td(e["date"].strftime("%a %d %b"))
+            + _small_td(html.escape(e["kind"]))
+            + _small_td(
+                f'{html.escape(e["name"])} <span style="font-size:10px;color:{TEXT_SECONDARY};'
+                f'letter-spacing:1px">{html.escape(e["ticker"])}</span>'
+            )
+            + "</tr>"
+        )
+    return (
+        '<table width="100%" cellpadding="0" cellspacing="0"><thead><tr>'
+        + _small_th("Date") + _small_th("Event") + _small_th("Holding")
+        + f"</tr></thead><tbody>{rows}</tbody></table>"
+    )
+
+
+def _scorecard_html(scorecard: list[dict]) -> str:
+    calls = [r for r in scorecard if r["hit"] is not None]
+    hits = sum(1 for r in calls if r["hit"])
+    summary = ""
+    if calls:
+        summary = (
+            f'<p style="font-family:Georgia,serif;font-size:15px;margin:0 0 16px">'
+            f'{hits} of {len(calls)} directional calls moved the right way so far.</p>'
+        )
+    rows = ""
+    for r in scorecard:
+        if r["change_pct"] is None:
+            change, change_color = "no longer held", TEXT_SECONDARY
+        else:
+            change, change_color = _fmt(r["change_pct"]), _color(r["change_pct"])
+        if r["hit"] is None:
+            verdict = "&ndash;"
+        else:
+            verdict = "&#10003;" if r["hit"] else "&#10007;"
+        rows += (
+            "<tr>"
+            + _small_td(html.escape(r["ticker"]))
+            + _small_td(html.escape(r["action"]))
+            + _small_td(f'No. {r["report"]}', "right", TEXT_SECONDARY)
+            + _small_td(change, "right", change_color)
+            + _small_td(verdict, "center")
+            + "</tr>"
+        )
+    return (
+        summary
+        + '<table width="100%" cellpadding="0" cellspacing="0"><thead><tr>'
+        + _small_th("Ticker") + _small_th("Call") + _small_th("Issue", "right")
+        + _small_th("Since", "right") + _small_th("Hit", "center")
+        + f"</tr></thead><tbody>{rows}</tbody></table>"
+    )
+
+
+def _optional_sections_html(
+    allocation: list[dict], events: list[dict], scorecard: list[dict],
+) -> str:
+    """Sections VII+ — each shown only when it has content."""
+    sections = []
+    if allocation:
+        sections.append(("Allocation vs Target", _allocation_html(allocation)))
+    if events:
+        sections.append(("Coming Up", _events_html(events)))
+    if scorecard:
+        sections.append(("Track Record", _scorecard_html(scorecard)))
+    out = ""
+    for i, (label, body) in enumerate(sections, start=6):
+        out += (
+            f'<div class="sect-pad" style="padding:24px 40px 40px">'
+            f"{_sect_header(_ROMAN[i], label)}{body}</div>\n"
+        )
+    return out
+
+
 # ── HTML email builder ────────────────────────────────────────────────────────
 def build_html_email(
     positions: list[dict],
@@ -282,6 +404,9 @@ def build_html_email(
     issue_num: int,
     unknown_fx: list[dict] | None = None,
     skipped: list[dict] | None = None,
+    allocation: list[dict] | None = None,
+    events: list[dict] | None = None,
+    scorecard: list[dict] | None = None,
 ) -> str:
     today = date.today()
     today_str = today.strftime("%B %-d, %Y") if os.name != "nt" else today.strftime("%B %d, %Y").replace(" 0", " ")
@@ -687,6 +812,7 @@ def build_html_email(
   {actionable_html}
 </div>
 
+{_optional_sections_html(allocation or [], events or [], scorecard or [])}
 {data_notes_html}
 
 <!-- Footer -->

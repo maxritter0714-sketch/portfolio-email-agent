@@ -809,3 +809,166 @@ def test_assert_analysis_complete_raises_on_truncated_last_line():
 def test_assert_analysis_complete_raises_on_empty_text():
     with pytest.raises(RuntimeError, match="empty"):
         _assert_analysis_complete("   ")
+
+
+# ── Deposit-free portfolio index ──────────────────────────────────────────────
+
+def _write_history(path, rows):
+    cols = list(market._HISTORY_COLS)
+    lines = [",".join(cols)]
+    for r in rows:
+        lines.append(",".join(str(r.get(c, "")) for c in cols))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_next_portfolio_index_starts_at_100_without_history(tmp_path, monkeypatch):
+    monkeypatch.setattr(market, "_HISTORY_PATH", tmp_path / "history.csv")
+    assert market.next_portfolio_index([], {"EUR": 1.0}) == 100.0
+
+
+def test_next_portfolio_index_chains_price_return_not_deposits(tmp_path, monkeypatch):
+    hist = tmp_path / "history.csv"
+    _write_history(hist, [
+        {"date": "2026-10-10", "total_value_eur": 1000, "source": "scheduled", "port_index": 100},
+        {"date": "2026-10-12", "total_value_eur": 9000, "source": "manual", "port_index": 500},
+    ])
+    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
+    idx = pd.to_datetime(["2026-10-09", "2026-10-16"])
+    monkeypatch.setattr(market, "_hist_cache", {"AAA": pd.Series([10.0, 11.0], index=idx)})
+    positions = [{"ticker": "AAA", "shares": 50.0, "currency": "EUR"}]
+    # The manual row is ignored; price +10% → index 110 no matter how many shares are held.
+    result = market.next_portfolio_index(positions, {"EUR": 1.0}, today=real_date(2026, 10, 17))
+    assert result == pytest.approx(110.0)
+
+
+def test_next_portfolio_index_same_day_returns_last_value(tmp_path, monkeypatch):
+    hist = tmp_path / "history.csv"
+    _write_history(hist, [{"date": "2026-10-17", "source": "scheduled", "port_index": 104.5}])
+    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
+    result = market.next_portfolio_index([], {"EUR": 1.0}, today=real_date(2026, 10, 17))
+    assert result == 104.5
+
+
+def test_history_chart_skips_rows_without_index(tmp_path, monkeypatch):
+    hist = tmp_path / "history.csv"
+    _write_history(hist, [
+        {"date": f"2026-0{m}-01", "total_value_eur": 1000, "sp500_close": 5000, "source": "scheduled"}
+        for m in range(1, 9)
+    ])
+    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
+    assert market.generate_history_chart() is None
+
+
+# ── Upcoming events ───────────────────────────────────────────────────────────
+
+def test_events_from_calendar_keeps_only_window():
+    from datetime import datetime
+    cal = {
+        "Earnings Date": [real_date(2026, 10, 28), real_date(2026, 11, 5)],
+        "Ex-Dividend Date": datetime(2026, 11, 30, 0, 0),
+        "Dividend Date": real_date(2026, 11, 2),
+    }
+    events = market.events_from_calendar(cal, "MSFT", "Microsoft", real_date(2026, 10, 29), 14)
+    assert [(e["date"], e["kind"]) for e in events] == [(real_date(2026, 11, 5), "Earnings")]
+
+
+def test_events_from_calendar_handles_empty():
+    assert market.events_from_calendar({}, "SXR8.DE", "S&P 500", real_date(2026, 10, 29), 14) == []
+
+
+# ── Target allocation ─────────────────────────────────────────────────────────
+
+def test_allocation_drift_groups_and_flags():
+    positions = [
+        {"ticker": "ETF1", "value_eur": 700.0},
+        {"ticker": "STK1", "value_eur": 200.0},
+        {"ticker": "OTHER", "value_eur": 100.0},
+    ]
+    targets = {"tolerance_pct": 5, "groups": [
+        {"name": "Core", "target_pct": 60, "tickers": ["ETF1"]},
+        {"name": "Stocks", "target_pct": 22, "tickers": ["STK1"]},
+    ]}
+    rows = {r["name"]: r for r in market.compute_allocation_drift(positions, targets)}
+    assert rows["Core"]["actual_pct"] == pytest.approx(70.0)
+    assert rows["Core"]["off_target"] is True
+    assert rows["Stocks"]["drift_pct"] == pytest.approx(-2.0)
+    assert rows["Stocks"]["off_target"] is False
+    assert rows["Unassigned"]["target_pct"] is None
+    assert rows["Unassigned"]["actual_pct"] == pytest.approx(10.0)
+
+
+def test_load_targets_missing_file_returns_none(tmp_path):
+    assert market.load_targets(tmp_path / "targets.json") is None
+
+
+# ── Conviction track record ───────────────────────────────────────────────────
+
+def test_conviction_scorecard_hits_and_misses():
+    from claude_report import conviction_scorecard
+    conviction = {
+        "UP": {"action": "ADD", "report": 40, "date": "2026-09-05", "price_eur": 100.0},
+        "DOWN": {"action": "ADD", "report": 41, "date": "2026-09-19", "price_eur": 100.0},
+        "CUT": {"action": "TRIM", "report": 41, "date": "2026-09-19", "price_eur": 100.0},
+        "LOOK": {"action": "RESEARCH", "report": 42, "date": "2026-10-03", "price_eur": 50.0},
+        "GONE": {"action": "EXIT", "report": 39, "date": "2026-08-22", "price_eur": 20.0},
+    }
+    positions = [
+        {"ticker": "UP", "price_eur": 120.0}, {"ticker": "DOWN", "price_eur": 90.0},
+        {"ticker": "CUT", "price_eur": 80.0}, {"ticker": "LOOK", "price_eur": 55.0},
+    ]
+    rows = {r["ticker"]: r for r in conviction_scorecard(conviction, positions)}
+    assert rows["UP"]["hit"] is True and rows["UP"]["change_pct"] == pytest.approx(20.0)
+    assert rows["DOWN"]["hit"] is False
+    assert rows["CUT"]["hit"] is True
+    assert rows["LOOK"]["hit"] is None
+    assert rows["GONE"]["change_pct"] is None and rows["GONE"]["hit"] is None
+
+
+def test_save_conviction_drops_stale_entries(tmp_path, monkeypatch):
+    monkeypatch.setattr("claude_report._CONVICTION_PATH", tmp_path / "conviction.json")
+    from datetime import timedelta
+    today = real_date.today()
+    conviction = {
+        "OLD": {"action": "ADD", "report": 10,
+                "date": (today - timedelta(days=200)).isoformat(), "price_eur": 1.0},
+        "NEW": {"action": "ADD", "report": 40,
+                "date": (today - timedelta(days=30)).isoformat(), "price_eur": 1.0},
+    }
+    save_conviction(conviction, [], [], issue_num=45)
+    assert "OLD" not in conviction and "NEW" in conviction
+
+
+# ── Optional email sections ───────────────────────────────────────────────────
+
+def test_optional_sections_hidden_when_empty():
+    html_out = _minimal_email()
+    for label in ("Allocation vs Target", "Coming Up", "Track Record"):
+        assert label not in html_out
+
+
+def test_optional_sections_numbered_after_actionable():
+    html_out = _minimal_email(
+        events=[{"date": real_date(2026, 11, 5), "kind": "Earnings", "ticker": "MSFT", "name": "Microsoft"}],
+        scorecard=[{"ticker": "UP", "action": "ADD", "report": 40, "date": "2026-09-05",
+                    "price_then": 100.0, "price_now": 120.0, "change_pct": 20.0, "hit": True}],
+    )
+    assert "VII.</span> Coming Up" in html_out
+    assert "VIII.</span> Track Record" in html_out
+    assert "1 of 1 directional calls" in html_out
+
+
+def test_conviction_scorecard_prefers_split_adjusted_reference():
+    from claude_report import conviction_scorecard
+    conviction = {"APH": {"action": "ADD", "report": 19, "date": "2026-07-11", "price_eur": 140.0}}
+    positions = [{"ticker": "APH", "price_eur": 72.0}]
+    rows = conviction_scorecard(conviction, positions, ref_prices={"APH": 70.0})
+    assert rows[0]["change_pct"] == pytest.approx(2.857, abs=0.01)
+    assert rows[0]["hit"] is True
+
+
+def test_recommendation_ref_prices_uses_history_on_date(monkeypatch):
+    idx = pd.to_datetime(["2026-07-09", "2026-07-10", "2026-07-13"])
+    monkeypatch.setattr(market, "_hist_cache", {"APH": pd.Series([69.0, 70.0, 71.0], index=idx)})
+    conviction = {"APH": {"date": "2026-07-11"}, "GONE": {"date": "2026-07-11"}}
+    positions = [{"ticker": "APH", "currency": "EUR"}]
+    assert market.recommendation_ref_prices(conviction, positions, {"EUR": 1.0}) == {"APH": 70.0}

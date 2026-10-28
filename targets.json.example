@@ -1,0 +1,7 @@
+{
+  "tolerance_pct": 5,
+  "groups": [
+    {"name": "Core ETFs", "target_pct": 60, "tickers": ["SXR8.DE", "IMAE.AS", "HEMA.L"]},
+    {"name": "Single stocks", "target_pct": 40, "tickers": ["MSFT", "TSM", "PLTR"]}
+  ]
+}

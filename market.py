@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import csv
+import json
 import logging
 import os
 import sys
 import tempfile
-from datetime import date, datetime as dt
+from datetime import date, datetime as dt, timedelta
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any
 
 import matplotlib
 matplotlib.use("Agg")
@@ -564,7 +565,11 @@ def _pie(ax, sizes: list[float], labels: list[str]) -> None:
 
 
 _HISTORY_PATH = Path("history.csv")
-_HISTORY_COLS = ("date", "issue", "total_value_eur", "sp500_close", "datetime", "source")
+_HISTORY_COLS = (
+    "date", "issue", "total_value_eur", "sp500_close", "datetime", "source",
+    "port_index", "sp500_eur",
+)
+_HISTORY_CHART_MIN_ROWS = 4
 
 
 def _is_float(value: object | None) -> bool:
@@ -579,7 +584,66 @@ def _is_float(value: object | None) -> bool:
     return False
 
 
-def append_history(summary: dict, issue_num: int, source: str = "scheduled") -> None:
+def _read_history() -> list[dict]:
+    if not _HISTORY_PATH.exists():
+        return []
+    with open(_HISTORY_PATH, newline="", encoding="utf-8-sig") as fh:
+        return list(csv.DictReader(fh))
+
+
+def _last_indexed_row(rows: list[dict]) -> dict | None:
+    """Most recent scheduled row that carries a portfolio index value."""
+    indexed = [
+        r for r in rows
+        if r.get("source", "scheduled") == "scheduled"
+        and r.get("date")
+        and _is_float(r.get("port_index"))
+    ]
+    return indexed[-1] if indexed else None
+
+
+def next_portfolio_index(
+    positions: list[dict], fx_rates: dict[str, float], today: date | None = None,
+) -> float:
+    """Chain the portfolio's EUR price return since the last indexed history row.
+
+    Deposits and withdrawals don't move the index: the return is measured on
+    the current holdings' share counts, held constant over the period. Trades
+    inside the period are therefore only approximated. Starts at 100.
+    """
+    today = today or date.today()
+    last = _last_indexed_row(_read_history())
+    if last is None:
+        return 100.0
+    last_index = float(last["port_index"])
+    since = pd.Timestamp(last["date"])
+    if since.date() >= today:
+        return last_index
+
+    start_value = end_value = 0.0
+    for p in positions:
+        close = _hist_cache.get(p["ticker"])
+        if close is None or close.empty:
+            continue
+        eur = _to_eur_close(close, p.get("currency", "USD"), fx_rates).dropna()
+        before = eur[eur.index <= since]
+        if before.empty:
+            continue
+        start_value += p["shares"] * float(before.iloc[-1])
+        end_value += p["shares"] * float(eur.iloc[-1])
+
+    if not start_value:
+        return last_index
+    return last_index * end_value / start_value
+
+
+def append_history(
+    summary: dict,
+    issue_num: int,
+    source: str = "scheduled",
+    port_index: float | None = None,
+    sp500_eur: float | None = None,
+) -> None:
     """Append one row to history.csv per (date, source) pair."""
     today_str = date.today().isoformat()
     now_str = dt.now().isoformat(timespec="seconds")
@@ -615,17 +679,16 @@ def append_history(summary: dict, issue_num: int, source: str = "scheduled") -> 
     else:
         sp500_close = float(sp500_series.iloc[-1])
 
-    row = cast(
-        dict[Literal["date", "issue", "total_value_eur", "sp500_close", "datetime", "source"], Any],
-        {
-            "date": today_str,
-            "issue": issue_num,
-            "total_value_eur": round(summary["total_value_eur"], 2),
-            "sp500_close": round(sp500_close, 4),
-            "datetime": now_str,
-            "source": source,
-        },
-    )
+    row: dict[str, Any] = {
+        "date": today_str,
+        "issue": issue_num,
+        "total_value_eur": round(summary["total_value_eur"], 2),
+        "sp500_close": round(sp500_close, 4),
+        "datetime": now_str,
+        "source": source,
+        "port_index": round(port_index, 4) if port_index is not None else "",
+        "sp500_eur": round(sp500_eur, 4) if sp500_eur is not None else "",
+    }
     write_header = not _HISTORY_PATH.exists()
     with open(_HISTORY_PATH, "a", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(_HISTORY_COLS))
@@ -635,26 +698,25 @@ def append_history(summary: dict, issue_num: int, source: str = "scheduled") -> 
 
 
 def generate_history_chart() -> str | None:
-    """Line chart: portfolio value vs S&P 500, both indexed to 100 at first point."""
-    if not _HISTORY_PATH.exists():
-        return None
-    rows: list[dict] = []
-    with open(_HISTORY_PATH, newline="", encoding="utf-8-sig") as fh:
-        rows = list(csv.DictReader(fh))
+    """Line chart: portfolio price index vs S&P 500 in EUR, both rebased to 100.
+
+    Uses the deposit-free port_index column, so cash in/out never shows up as
+    performance. Rows written before that column existed are skipped.
+    """
     # Keep only valid scheduled rows — manual runs don't belong in the trend chart.
     rows = [
-        r for r in rows
+        r for r in _read_history()
         if r.get("date")
-        and _is_float(r.get("total_value_eur"))
-        and _is_float(r.get("sp500_close"))
+        and _is_float(r.get("port_index"))
+        and _is_float(r.get("sp500_eur"))
         and r.get("source", "scheduled") == "scheduled"
     ]
-    if len(rows) < 6:
+    if len(rows) < _HISTORY_CHART_MIN_ROWS:
         return None
 
     labels   = [r["date"] for r in rows]
-    port_raw = [float(r["total_value_eur"]) for r in rows]
-    sp_raw   = [float(r["sp500_close"]) for r in rows]
+    port_raw = [float(r["port_index"]) for r in rows]
+    sp_raw   = [float(r["sp500_eur"]) for r in rows]
 
     base_port = port_raw[0] or 1.0
     base_sp   = sp_raw[0]   or 1.0
@@ -665,7 +727,7 @@ def generate_history_chart() -> str | None:
     ax.plot(range(len(labels)), port_idx, color=DARK_GOLD, linewidth=2,
             label="Portfolio", marker="o", markersize=4)
     ax.plot(range(len(labels)), sp_idx, color=NAVY, linewidth=1.5,
-            linestyle="--", label="S&P 500", marker="o", markersize=3)
+            linestyle="--", label="S&P 500 (EUR)", marker="o", markersize=3)
     ax.axhline(100, color=TEXT_SECONDARY, linewidth=0.5, linestyle=":")
     ax.set_xticks(range(len(labels)))
     ax.set_xticklabels(
@@ -673,7 +735,7 @@ def generate_history_chart() -> str | None:
         fontsize=7, color=TEXT_PRIMARY, fontfamily="serif", rotation=45, ha="right",
     )
     ax.tick_params(axis="y", labelsize=8, colors=TEXT_PRIMARY)
-    ax.set_title("Since inception, indexed to 100 at start", fontsize=8,
+    ax.set_title("Price return in EUR, deposits excluded, indexed to 100 at start", fontsize=8,
                  color=TEXT_SECONDARY, fontfamily="serif", pad=6)
     ax.set_ylabel("Indexed (start = 100)", fontsize=8, color=TEXT_SECONDARY,
                   fontfamily="serif")
@@ -761,6 +823,127 @@ def generate_charts(positions: list[dict], summary: dict,
 
     log.info("Generated %d charts", len(charts))
     return charts
+
+
+# ── Recommendation reference prices ───────────────────────────────────────────
+def recommendation_ref_prices(
+    conviction: dict, positions: list[dict], fx_rates: dict[str, float],
+) -> dict[str, float]:
+    """Split-adjusted EUR close on each recommendation's date, from cached history.
+
+    The price stored in conviction.json is unadjusted, so a stock split after
+    the recommendation would show up as a fake crash. Tickers without history
+    covering that date are left out; callers fall back to the stored price.
+    """
+    currency_of = {p["ticker"]: p.get("currency", "USD") for p in positions}
+    out: dict[str, float] = {}
+    for ticker, rec in conviction.items():
+        close = _hist_cache.get(ticker)
+        if ticker not in currency_of or close is None or close.empty or not rec.get("date"):
+            continue
+        eur = _to_eur_close(close, currency_of[ticker], fx_rates).dropna()
+        before = eur[eur.index <= pd.Timestamp(rec["date"])]
+        if not before.empty:
+            out[ticker] = float(before.iloc[-1])
+    return out
+
+
+# ── Upcoming events ───────────────────────────────────────────────────────────
+def _as_dates(value: object) -> list[date]:
+    """yfinance calendar values are a date, a list of dates, or missing."""
+    items = value if isinstance(value, (list, tuple)) else [value]
+    out: list[date] = []
+    for item in items:
+        if isinstance(item, dt):
+            out.append(item.date())
+        elif isinstance(item, date):
+            out.append(item)
+    return out
+
+
+def events_from_calendar(
+    calendar: dict, ticker: str, name: str, today: date, days: int,
+) -> list[dict]:
+    """Earnings and ex-dividend dates from one yfinance calendar, within the window."""
+    window_end = today + timedelta(days=days)
+    events: list[dict] = []
+    for key, kind in (("Earnings Date", "Earnings"), ("Ex-Dividend Date", "Ex-dividend")):
+        for d in _as_dates(calendar.get(key)):
+            if today <= d <= window_end:
+                events.append(dict(date=d, ticker=ticker, name=name, kind=kind))
+    return events
+
+
+def fetch_upcoming_events(positions: list[dict], days: int = 14) -> list[dict]:
+    """Earnings and ex-dividend dates for directly held stocks in the next `days`.
+
+    ETFs are skipped — Yahoo publishes no calendar for them.
+    """
+    today = date.today()
+    events: list[dict] = []
+    for p in positions:
+        if p.get("sector") == "ETF":
+            continue
+        try:
+            calendar = yf.Ticker(p["ticker"]).calendar or {}
+        except Exception as exc:
+            log.debug("No calendar for %s: %s", p["ticker"], exc)
+            continue
+        events.extend(events_from_calendar(calendar, p["ticker"], p["name"], today, days))
+    events.sort(key=lambda e: (e["date"], e["ticker"]))
+    log.info("Upcoming events (next %d days): %d", days, len(events))
+    return events
+
+
+# ── Target allocation ─────────────────────────────────────────────────────────
+_TARGETS_PATH = Path("targets.json")
+_UNASSIGNED = "Unassigned"
+
+
+def load_targets(path: Path = _TARGETS_PATH) -> dict | None:
+    """Optional target allocation from targets.json, or None when not configured."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:
+        log.warning("Could not read %s (%s) — skipping target allocation", path, exc)
+        return None
+
+
+def compute_allocation_drift(positions: list[dict], targets: dict) -> list[dict]:
+    """Actual vs target weight per group. Tickers in no group land in 'Unassigned'."""
+    total = sum(p["value_eur"] for p in positions)
+    if not total:
+        return []
+    tolerance = float(targets.get("tolerance_pct", 5.0))
+    group_of: dict[str, str] = {}
+    rows: list[dict] = []
+    for g in targets.get("groups", []):
+        rows.append(dict(name=g["name"], target_pct=float(g["target_pct"]), value_eur=0.0))
+        for t in g.get("tickers", []):
+            group_of[t] = g["name"]
+    by_name = {r["name"]: r for r in rows}
+
+    unassigned = 0.0
+    for p in positions:
+        group = group_of.get(p["ticker"])
+        if group is None:
+            unassigned += p["value_eur"]
+        else:
+            by_name[group]["value_eur"] += p["value_eur"]
+    if unassigned:
+        rows.append(dict(name=_UNASSIGNED, target_pct=None, value_eur=unassigned))
+
+    for r in rows:
+        r["actual_pct"] = r["value_eur"] / total * 100
+        if r["target_pct"] is None:
+            r["drift_pct"] = None
+            r["off_target"] = False
+        else:
+            r["drift_pct"] = r["actual_pct"] - r["target_pct"]
+            r["off_target"] = abs(r["drift_pct"]) > tolerance
+    return rows
 
 
 def get_history_ytd(current_value: float) -> float | None:

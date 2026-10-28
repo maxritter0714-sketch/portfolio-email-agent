@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import anthropic
@@ -13,8 +14,14 @@ from news import _extract_text_from_response, _first_token, _word_in
 
 log = logging.getLogger(__name__)
 
-CLAUDE_MODEL = "claude-sonnet-4-6"
+DEFAULT_CLAUDE_MODEL = "claude-sonnet-5"
+_CONVICTION_MAX_AGE_DAYS = 182  # older recommendations are dropped
 _CONVICTION_PATH = Path("conviction.json")
+
+
+def claude_model() -> str:
+    """Model for analysis and headline. Override with CLAUDE_MODEL."""
+    return os.getenv("CLAUDE_MODEL", "").strip() or DEFAULT_CLAUDE_MODEL
 
 
 def _value_vs_jan_line(summary: dict) -> str:
@@ -28,7 +35,7 @@ def _value_vs_jan_line(summary: dict) -> str:
 
 
 # ── Claude analysis ───────────────────────────────────────────────────────────
-def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None) -> str:
+def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None, events: list[dict] | None = None, allocation: list[dict] | None = None, ref_prices: dict[str, float] | None = None) -> str:
     positions_text = "\n".join(
         f"- {p['name']} ({p['ticker']}): {p['shares']:.4g} shares | "
         f"current €{p['price_eur']:.2f} | "
@@ -135,20 +142,51 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         f"BENCHMARKS\n{bench_text}"
         f"{metrics_text}"
         f"{momentum_text}"
-        f"{lookthrough_text}\n\n"
+        f"{lookthrough_text}"
+        f"{_build_events_context(events)}"
+        f"{_build_allocation_context(allocation)}\n\n"
         f"PORTFOLIO NEWS\n{port_news_text}\n\n"
         f"GENERAL NEWS\n{gen_news_text}"
-        + _build_conviction_context(conviction, positions)
+        + _build_conviction_context(conviction, positions, ref_prices)
     )
 
 
-def _build_conviction_context(conviction: dict | None, positions: list[dict]) -> str:
+def _build_events_context(events: list[dict] | None) -> str:
+    if not events:
+        return ""
+    lines = [
+        f"- {e['date'].isoformat()}: {e['kind']} — {e['name']} ({e['ticker']})"
+        for e in events
+    ]
+    return "\n\nUPCOMING EVENTS (next 14 days)\n" + "\n".join(lines)
+
+
+def _build_allocation_context(allocation: list[dict] | None) -> str:
+    if not allocation:
+        return ""
+    lines = []
+    for r in allocation:
+        if r["target_pct"] is None:
+            lines.append(f"- {r['name']}: {r['actual_pct']:.1f}% (no target)")
+        else:
+            flag = " — OUTSIDE TOLERANCE" if r["off_target"] else ""
+            lines.append(
+                f"- {r['name']}: {r['actual_pct']:.1f}% vs target {r['target_pct']:.1f}% "
+                f"({r['drift_pct']:+.1f} pts){flag}"
+            )
+    return "\n\nTARGET ALLOCATION (owner-defined)\n" + "\n".join(lines)
+
+
+def _build_conviction_context(
+    conviction: dict | None, positions: list[dict], ref_prices: dict[str, float] | None = None,
+) -> str:
     if not conviction:
         return ""
     price_map = {p["ticker"]: p["price_eur"] for p in positions}
+    ref_prices = ref_prices or {}
     lines = []
     for ticker, rec in conviction.items():
-        price_at = rec.get("price_eur", 0.0)
+        price_at = ref_prices.get(ticker) or rec.get("price_eur", 0.0)
         current = price_map.get(ticker)
         if current and price_at:
             chg = (current - price_at) / price_at * 100
@@ -169,8 +207,10 @@ _PROMPT_PERSONA = (
     "advanced quant metrics including Sharpe, Beta, Alpha, Sortino, VaR, Max "
     "Drawdown, rolling 90d Sharpe and 30d/90d Beta, per-holding multi-timeframe "
     "momentum scores (quartile-ranked, 4=strongest), and LOOK-THROUGH EXPOSURE data "
-    "showing stocks embedded inside held ETFs beyond any direct position. Use these "
-    "metrics to give specific analysis."
+    "showing stocks embedded inside held ETFs beyond any direct position. When present, "
+    "you also get UPCOMING EVENTS (earnings and ex-dividend dates in the next 14 days) "
+    "and an owner-defined TARGET ALLOCATION; weigh any group outside its tolerance in "
+    "the actionable suggestions. Use these metrics to give specific analysis."
 )
 
 _PROMPT_STRUCTURE = (
@@ -253,18 +293,19 @@ def _assert_analysis_complete(text: str) -> None:
         )
 
 
-def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None) -> str:
+def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None, events: list[dict] | None = None, allocation: list[dict] | None = None, ref_prices: dict[str, float] | None = None) -> str:
     """Return Claude's analysis as markdown (sections 1-4)."""
     client = anthropic.Anthropic()
 
     system_prompt = "\n\n".join([_PROMPT_PERSONA, _PROMPT_STRUCTURE, _PROMPT_FORMATTING])
 
-    user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction, momentum, lookthrough)
+    user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction, momentum, lookthrough, events, allocation, ref_prices)
 
-    log.info("Calling Claude API for analysis (model: %s)…", CLAUDE_MODEL)
+    log.info("Calling Claude API for analysis (model: %s)…", claude_model())
     response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=5000,
+        model=claude_model(),
+        # Headroom for adaptive thinking, which counts toward max_tokens.
+        max_tokens=16000,
         system=[{
             "type": "text",
             "text": system_prompt,
@@ -325,8 +366,10 @@ def call_claude_headline(summary: dict, benchmarks: list[dict], metrics: dict) -
 
     log.info("Calling Claude API for headline…")
     response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=120,
+        model=claude_model(),
+        # One sentence: keep thinking light, but leave room for it in max_tokens.
+        max_tokens=2000,
+        output_config={"effort": "low"},
         system=[{"type": "text", "text": system}],
         messages=[{"role": "user", "content": context}],
     )
@@ -449,6 +492,9 @@ def save_conviction(
     """Update conviction.json with any tickers mentioned in this run's actions."""
     price_map = {p["ticker"]: p["price_eur"] for p in positions}
     today = date.today().isoformat()
+    cutoff = (date.today() - timedelta(days=_CONVICTION_MAX_AGE_DAYS)).isoformat()
+    for ticker in [t for t, rec in conviction.items() if rec.get("date", "") < cutoff]:
+        del conviction[ticker]
     for item in actionable_items:
         matched = match_action_ticker(item, positions)
         if matched:
@@ -459,3 +505,38 @@ def save_conviction(
                 "price_eur": price_map.get(matched, 0.0),
             }
     _CONVICTION_PATH.write_text(json.dumps(conviction, indent=2), encoding="utf-8")
+
+
+# ── Recommendation track record ───────────────────────────────────────────────
+_HIT_DIRECTION = {"ADD": 1, "TRIM": -1, "EXIT": -1}
+
+
+def conviction_scorecard(
+    conviction: dict, positions: list[dict], ref_prices: dict[str, float] | None = None,
+) -> list[dict]:
+    """How each prior recommendation's price moved since it was made.
+
+    ADD is a hit when the price rose; TRIM and EXIT when it fell. RESEARCH has
+    no direction. Positions no longer held have no current price. `ref_prices`
+    (split-adjusted) take precedence over the price stored at the time.
+    """
+    price_map = {p["ticker"]: p["price_eur"] for p in positions}
+    ref_prices = ref_prices or {}
+    rows: list[dict] = []
+    for ticker, rec in conviction.items():
+        price_then = ref_prices.get(ticker) or rec.get("price_eur") or 0.0
+        price_now = price_map.get(ticker)
+        change_pct = None
+        if price_now and price_then:
+            change_pct = (price_now - price_then) / price_then * 100
+        direction = _HIT_DIRECTION.get(rec.get("action", ""))
+        hit = None
+        if direction is not None and change_pct:
+            hit = (change_pct > 0) == (direction > 0)
+        rows.append(dict(
+            ticker=ticker, action=rec.get("action", ""), report=rec.get("report", 0),
+            date=rec.get("date", ""), price_then=price_then, price_now=price_now,
+            change_pct=change_pct, hit=hit,
+        ))
+    rows.sort(key=lambda r: (-r["report"], r["ticker"]))
+    return rows

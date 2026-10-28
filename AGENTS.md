@@ -14,6 +14,6 @@ adds notes for other agents, mostly used for code review.
   to settled design choices (e.g. fortnight send cadence, ISIN resolution,
   single-call Claude analysis).
 - Never read out, print, or commit secrets or personal data: `.env`,
-  `portfolio.csv`, `finanzfluss_export.csv`, `isin_map.json`, `history.csv`,
-  `conviction.json`.
+  `portfolio.csv`, `finanzfluss_export.csv`, `isin_map.json`, `targets.json`,
+  `history.csv`, `conviction.json`.
 - Reviews are read-only: report findings, don't commit or push.

@@ -353,10 +353,18 @@ def main() -> None:
         action="store_true",
         help="Suppress per-row output; only print summary and warnings",
     )
+    parser.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="Exit 0 even if some ISINs could not be mapped (they are left out)",
+    )
     args = parser.parse_args()
 
     _, warnings = convert(args.input, args.output, FINANZFLUSS, verbose=not args.quiet)
-    if warnings:
+    if warnings and os.getenv("GITHUB_ACTIONS") == "true":
+        for w in warnings:
+            print(f"::warning title=Unmapped ISIN::{w}")
+    if warnings and not args.allow_missing:
         sys.exit(1)
 
 

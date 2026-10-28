@@ -171,14 +171,15 @@ All runs are logged to `agent.log` in the project directory.
 portfolio.csv
      │
      ▼
-yfinance ──→ live prices + weekly/monthly/YTD changes (USD→EUR conversion)
+yfinance ──→ live prices + weekly/monthly/YTD changes, all in EUR (daily FX)
      │
-     ├──→ S&P 500 / Nasdaq / MSCI World benchmark comparison
+     ├──→ S&P 500 / Nasdaq / MSCI World benchmarks, also in EUR
+     ├──→ earnings + ex-dividend dates for the next 14 days
      │
-NewsAPI ──→ 30 articles → Haiku relevance filter (0–2 score) → top 10 relevant + 5 general
+NewsAPI ──→ articles → Haiku relevance filter (0–2 score) → top 10 relevant + world digest
      │
      ▼
-Claude (claude-sonnet-4-6)
+Claude (claude-sonnet-5, override with CLAUDE_MODEL)
   ├── Portfolio Performance Summary
   ├── Benchmark Comparison
   ├── News & Market Context
@@ -187,6 +188,10 @@ Claude (claude-sonnet-4-6)
      ▼
 HTML email → Gmail SMTP → your inbox
 ```
+
+The email also includes, when there is data for them: **Allocation vs Target** (see step 8), **Coming Up** (earnings and ex-dividend dates), and a **Track Record** of earlier recommendations — ADD counts as a hit when the price rose since, TRIM/EXIT when it fell.
+
+The history chart compares a deposit-free portfolio index with the S&P 500 in EUR. Each weekly run chains the price return of your current holdings since the previous run, so money you pay in or take out never shows up as performance. The chart appears once four weekly data points with the index exist.
 
 
 
@@ -220,6 +225,15 @@ cp isin_map.json.example isin_map.json
 
 > **Note:** `finanzfluss_export.csv` and `isin_map.json` are in `.gitignore` — your holdings stay private.
 
+---
 
+## 8 — Target allocation (optional)
 
+Set target weights for groups of holdings and the report shows how far each group has drifted:
 
+```bash
+cp targets.json.example targets.json
+# then edit groups, target_pct and tickers (Yahoo tickers as in portfolio.csv)
+```
+
+Holdings in no group are shown as *Unassigned*. Groups that drift by more than `tolerance_pct` percentage points are highlighted and fed to Claude for the actionable suggestions. `targets.json` is gitignored; for GitHub Actions, upload it to your private data repo next to `isin_map.json`.
