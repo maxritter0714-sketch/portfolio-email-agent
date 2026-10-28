@@ -46,10 +46,12 @@ from market import (
     is_send_saturday,
     issue_number,
     load_portfolio,
+    load_cashflows,
     load_targets,
     load_unmapped_isins,
     next_portfolio_index,
     recommendation_ref_prices,
+    value_change_breakdown,
 )
 from metrics import (
     compute_advanced_metrics,
@@ -210,10 +212,19 @@ def main() -> None:
         positions, summary, unknown_fx, skipped = fetch_portfolio_data(rows, fx_rates)
         positions.sort(key=lambda p: p["value_eur"], reverse=True)
 
-        vs_jan = get_history_ytd(summary["total_value_eur"])
-        summary["value_vs_jan_pct"] = vs_jan
-        if vs_jan is not None:
-            log.info("Book value vs January snapshot: %+.2f%%", vs_jan)
+        breakdown = value_change_breakdown(summary["total_value_eur"], load_cashflows())
+        summary["value_breakdown"] = breakdown
+        if breakdown:
+            # Supersedes vs-January, which mixes deposits into the change.
+            summary["value_vs_jan_pct"] = None
+            log.info("Value change since %s: %+.0f EUR (paid in %+.0f, market %+.0f)",
+                     breakdown["since"], breakdown["change"],
+                     breakdown["invested"], breakdown["market"])
+        else:
+            vs_jan = get_history_ytd(summary["total_value_eur"])
+            summary["value_vs_jan_pct"] = vs_jan
+            if vs_jan is not None:
+                log.info("Book value vs January snapshot: %+.2f%%", vs_jan)
 
         if not positions:
             log.error("No position data could be fetched. Aborting.")

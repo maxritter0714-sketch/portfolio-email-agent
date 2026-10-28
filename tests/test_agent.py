@@ -1008,3 +1008,16 @@ def test_email_no_warning_for_fresh_holdings():
     html_out = _minimal_email(holdings_as_of=real_date.today())
     assert "days old" not in html_out
     assert "could not be mapped" not in html_out
+
+
+def test_email_shows_value_breakdown():
+    breakdown = dict(since=real_date(2026, 6, 14), start_value=30000.0, change=2500.0,
+                     invested=1000.0, market=1500.0, income=20.0,
+                     flows_as_of=real_date.today())
+    html_out = _minimal_email(summary=dict(
+        total_value_eur=32500.0, fortnight_pct=1.0, monthly_pct=2.0, weekly_pct=0.5,
+        ytd_pct=8.0, portfolio_yield_pct=1.2, value_breakdown=breakdown,
+    ))
+    assert "Since 14 Jun 2026" in html_out
+    assert "+€1,500" in html_out and "+€1,000" in html_out
+    assert "split is unreliable" not in html_out

@@ -372,9 +372,37 @@ def _scorecard_html(scorecard: list[dict]) -> str:
 HOLDINGS_STALE_DAYS = 30
 
 
-def _data_warning_html(today: date, holdings_as_of: date | None, unmapped: list[dict]) -> str:
+def _breakdown_html(b: dict) -> str:
+    """Masthead line: value change since the baseline, split into paid in vs market."""
+    def part(label: str, val: float) -> str:
+        return (
+            f'<span style="color:{TEXT_SECONDARY}">{label}</span> '
+            f'<span style="color:{_color(val)}">{_eur_signed(val)}</span>'
+        )
+    return (
+        f'<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px">'
+        f'<tr><td style="font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.7;'
+        f'color:{BG_CREAM}">'
+        f'<div style="font-size:9px;text-transform:uppercase;letter-spacing:2px;'
+        f'color:{TEXT_SECONDARY};margin-bottom:4px">Since {b["since"].strftime("%d %b %Y")}</div>'
+        f'{part("Value", b["change"])} &nbsp;=&nbsp; {part("paid in", b["invested"])} '
+        f'&nbsp;+&nbsp; {part("market", b["market"])}'
+        f' &nbsp;&middot;&nbsp; {part("dividends &amp; interest", b["income"])}'
+        f'</td></tr></table>'
+    )
+
+
+def _data_warning_html(
+    today: date, holdings_as_of: date | None, unmapped: list[dict],
+    flows_as_of: date | None = None,
+) -> str:
     """Banner under the masthead when the holdings data can't be fully trusted."""
     lines = []
+    if flows_as_of and (today - flows_as_of).days > HOLDINGS_STALE_DAYS:
+        lines.append(
+            f"Cash-flow data ends {flows_as_of.strftime('%d %b %Y')}, so the paid-in vs "
+            f"market split is unreliable — refresh the Finanzfluss transactions export."
+        )
     if holdings_as_of and (today - holdings_as_of).days > HOLDINGS_STALE_DAYS:
         lines.append(
             f"Holdings data is {(today - holdings_as_of).days} days old "
@@ -439,7 +467,12 @@ def build_html_email(
     unmapped: list[dict] | None = None,
 ) -> str:
     today = date.today()
-    warning_html = _data_warning_html(today, holdings_as_of, unmapped or [])
+    breakdown = summary.get("value_breakdown")
+    warning_html = _data_warning_html(
+        today, holdings_as_of, unmapped or [],
+        breakdown["flows_as_of"] if breakdown else None,
+    )
+    breakdown_html = _breakdown_html(breakdown) if breakdown else ""
     today_str = today.strftime("%B %-d, %Y") if os.name != "nt" else today.strftime("%B %d, %Y").replace(" 0", " ")
 
     total = summary["total_value_eur"]
@@ -692,6 +725,11 @@ def build_html_email(
     notes_parts: list[str] = []
     if holdings_as_of:
         notes_parts.append(f"Holdings as of {holdings_as_of.strftime('%d %b %Y')}.")
+    if breakdown:
+        notes_parts.append(
+            f"Cash flows as of {breakdown['flows_as_of'].strftime('%d %b %Y')}; "
+            "market = value change minus net money paid in."
+        )
     notes_parts.append(
         "Holding and index 1W/2W/1M/YTD figures are euro returns."
     )
@@ -785,6 +823,7 @@ def build_html_email(
       {mast_stats}
     </tr>
   </table>
+  {breakdown_html}
 </td></tr>
 </table>
 

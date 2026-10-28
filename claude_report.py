@@ -25,6 +25,13 @@ def claude_model() -> str:
 
 
 def _value_vs_jan_line(summary: dict) -> str:
+    b = summary.get("value_breakdown")
+    if b:
+        return (
+            f"\nValue change since {b['since'].isoformat()}: €{b['change']:+,.0f} "
+            f"(net paid in €{b['invested']:+,.0f}, market gain €{b['market']:+,.0f}; "
+            f"dividends/interest to cash €{b['income']:+,.0f})"
+        )
     vs_jan = summary.get("value_vs_jan_pct")
     if vs_jan is None:
         return ""

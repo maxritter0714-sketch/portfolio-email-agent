@@ -239,3 +239,16 @@ cp targets.json.example targets.json
 ```
 
 Holdings in no group are shown as *Unassigned*. Groups that drift by more than `tolerance_pct` percentage points are highlighted and fed to Claude for the actionable suggestions. `targets.json` is gitignored; for GitHub Actions, upload it to your private data repo next to `isin_map.json`.
+
+---
+
+## 9 — Paid in vs market gain (optional)
+
+The masthead can split the value change into money you paid in and actual market gain. Export your account transactions from Finanzfluss as `finanzfluss_transactions.csv`, then:
+
+```bash
+python import_cashflows.py --input finanzfluss_transactions.csv
+```
+
+This writes `cashflows.csv` with only daily totals of money invested (buys minus sells) and dividends/interest — private spending, counterparties and transfers are dropped. Upload `cashflows.csv` (never the raw export) to your private data repo for GitHub Actions. The split runs from the first history entry of the current year, and the email warns when the cash-flow data is more than 30 days old. Both files are gitignored.
+

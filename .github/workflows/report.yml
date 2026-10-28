@@ -33,6 +33,7 @@ jobs:
           cp _data/conviction.json . 2>/dev/null || true
           cp _data/isin_map.json . 2>/dev/null || true
           cp _data/targets.json . 2>/dev/null || true
+          cp _data/cashflows.csv . 2>/dev/null || true
           echo "PORTFOLIO_AS_OF=$(git -C _data log -1 --format=%cs -- finanzfluss_export.csv)" >> "$GITHUB_ENV"
 
       - name: Set up Python

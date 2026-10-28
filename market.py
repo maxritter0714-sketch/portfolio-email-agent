@@ -981,6 +981,63 @@ def compute_allocation_drift(positions: list[dict], targets: dict) -> list[dict]
     return rows
 
 
+# ── Value change breakdown ────────────────────────────────────────────────────
+_CASHFLOWS_PATH = Path("cashflows.csv")
+
+
+def load_cashflows(path: Path = _CASHFLOWS_PATH) -> list[dict]:
+    """Daily invested/income totals written by import_cashflows.py, or [] if absent."""
+    if not path.exists():
+        return []
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        rows = list(csv.DictReader(fh))
+    return [
+        dict(date=r["date"], invested_eur=float(r["invested_eur"]), income_eur=float(r["income_eur"]))
+        for r in rows
+        if r.get("date") and _is_float(r.get("invested_eur")) and _is_float(r.get("income_eur"))
+    ]
+
+
+def value_change_breakdown(
+    current_value: float,
+    cashflows: list[dict],
+    history: list[dict] | None = None,
+    today: date | None = None,
+) -> dict | None:
+    """Split the value change since a baseline into money paid in vs market gain.
+
+    The baseline is the first history row of the current year, else the first
+    row overall. Dividends and interest land on the cash account, so they are
+    reported separately and are not part of the value change. None when there
+    is no baseline or no cash-flow data.
+    """
+    if not cashflows:
+        return None
+    today = today or date.today()
+    rows = [
+        r for r in (history if history is not None else _read_history())
+        if r.get("date") and _is_float(r.get("total_value_eur"))
+    ]
+    if not rows:
+        return None
+    this_year = [r for r in rows if r["date"].startswith(str(today.year))]
+    base = (this_year or rows)[0]
+    since = base["date"]
+    period = [c for c in cashflows if since < c["date"] <= today.isoformat()]
+    start_value = float(base["total_value_eur"])
+    invested = sum(c["invested_eur"] for c in period)
+    change = current_value - start_value
+    return dict(
+        since=date.fromisoformat(since),
+        start_value=start_value,
+        change=change,
+        invested=invested,
+        market=change - invested,
+        income=sum(c["income_eur"] for c in period),
+        flows_as_of=date.fromisoformat(cashflows[-1]["date"]),
+    )
+
+
 def get_history_ytd(current_value: float) -> float | None:
     """Book-value change vs the first January snapshot in history.csv, or None.
 

@@ -5,6 +5,7 @@
 portfolio.csv
 finanzfluss_export.csv
 finanzfluss_transactions.csv
+cashflows.csv
 
 # Logs & previews
 agent.log
