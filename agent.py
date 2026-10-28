@@ -180,25 +180,6 @@ def main() -> None:
     log.info("=== Portfolio Agent starting ===")
 
     try:
-        ff_export = "investments.csv"
-        if os.path.exists(ff_export):
-            log.info("Found '%s' — refreshing portfolio.csv via import_finanzfluss…", ff_export)
-            try:
-                import import_portfolio as _import_mod
-                count, import_warnings = _import_mod.convert(
-                    input_path=ff_export,
-                    output_path="portfolio.csv",
-                    verbose=False,
-                )
-                log.info("import_portfolio: wrote %d holdings to portfolio.csv", count)
-                for iw in import_warnings:
-                    log.warning("import_portfolio: %s", iw)
-            except Exception as exc:
-                log.error(
-                    "import_finanzfluss failed (%s) — falling back to existing portfolio.csv",
-                    exc,
-                )
-
         rows = load_portfolio("portfolio.csv")
 
         log.info("Fetching FX rates…")
