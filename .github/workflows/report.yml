@@ -24,6 +24,7 @@ jobs:
           repository: ${{ vars.PORTFOLIO_DATA_REPO || 'maxritter0714-sketch/portfolio-agent-data' }}
           token: ${{ secrets.DATA_REPO_TOKEN }}
           path: _data
+          fetch-depth: 0  # full history, to date the last export commit
 
       - name: Copy data files into working directory
         run: |
@@ -32,6 +33,7 @@ jobs:
           cp _data/conviction.json . 2>/dev/null || true
           cp _data/isin_map.json . 2>/dev/null || true
           cp _data/targets.json . 2>/dev/null || true
+          echo "PORTFOLIO_AS_OF=$(git -C _data log -1 --format=%cs -- finanzfluss_export.csv)" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@v7

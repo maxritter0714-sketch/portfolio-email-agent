@@ -73,6 +73,8 @@ FINANZFLUSS = ExportConfig(
 
 # -- Output format -------------------------------------------------------------
 OUTPUT_COLUMNS = ("ticker", "name", "shares", "avg_buy_price")
+# Written next to the output CSV so agent.py can list skipped holdings in the email.
+UNMAPPED_FILENAME = "unmapped_isins.json"
 
 # -- ISIN -> Yahoo Finance ticker overrides ------------------------------------
 # Loaded from isin_map.json (gitignored) at startup.
@@ -291,6 +293,7 @@ def convert(
     # Build holdings list
     holdings: list[dict] = []
     warnings: list[str] = []
+    unmapped_rows: list[dict] = []
 
     for row in active_rows:
         name = row.get(cfg.col_name, "").strip()
@@ -306,6 +309,7 @@ def convert(
                 f"Add it to isin_map.json or check the ISIN on finance.yahoo.com."
             )
             warnings.append(msg)
+            unmapped_rows.append({"isin": isin, "name": name})
             if verbose:
                 print(f"  {msg}")
             continue
@@ -321,6 +325,10 @@ def convert(
         writer = csv.DictWriter(fh, fieldnames=list(OUTPUT_COLUMNS), extrasaction="ignore")
         writer.writeheader()
         writer.writerows(holdings)
+
+    # Always rewritten (empty list when all mapped) so a stale file never lingers.
+    unmapped_path = Path(output_path).with_name(UNMAPPED_FILENAME)
+    unmapped_path.write_text(json.dumps(unmapped_rows, indent=2), encoding="utf-8")
 
     if verbose:
         print(f"\nWrote {len(holdings)} active holdings to '{output_path}'.")

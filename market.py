@@ -185,6 +185,41 @@ def load_portfolio(filepath: str = "portfolio.csv") -> list[dict]:
     return rows
 
 
+_EXPORT_PATH = Path("finanzfluss_export.csv")
+_UNMAPPED_PATH = Path("unmapped_isins.json")
+
+
+def holdings_as_of(portfolio_path: str = "portfolio.csv") -> date | None:
+    """Date the holdings were last exported.
+
+    In GitHub Actions the workflow sets PORTFOLIO_AS_OF from the data repo's
+    last commit of the export (file mtimes there are just checkout time).
+    Locally, the export's file date is used, else portfolio.csv's.
+    """
+    raw = os.getenv("PORTFOLIO_AS_OF", "").strip()
+    if raw:
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            log.warning("Invalid PORTFOLIO_AS_OF=%r — falling back to file date", raw)
+    for path in (_EXPORT_PATH, Path(portfolio_path)):
+        if path.exists():
+            return date.fromtimestamp(path.stat().st_mtime)
+    return None
+
+
+def load_unmapped_isins(path: Path = _UNMAPPED_PATH) -> list[dict]:
+    """Holdings import_portfolio.py could not map to a ticker (left out of the report)."""
+    if not path.exists():
+        return []
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log.warning("Could not read %s (%s)", path, exc)
+        return []
+    return rows if isinstance(rows, list) else []
+
+
 # ── Market data ───────────────────────────────────────────────────────────────
 # Yahoo pair and whether to invert (EURXXX=X quotes XXX per 1 EUR).
 _FX_PAIRS: dict[str, tuple[str, bool]] = {

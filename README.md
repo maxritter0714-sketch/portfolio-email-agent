@@ -191,6 +191,8 @@ HTML email → Gmail SMTP → your inbox
 
 The email also includes, when there is data for them: **Allocation vs Target** (see step 8), **Coming Up** (earnings and ex-dividend dates), and a **Track Record** of earlier recommendations — ADD counts as a hit when the price rose since, TRIM/EXIT when it fell.
 
+A red banner under the masthead warns when the holdings export is more than 30 days old, or when the import left out holdings whose ISIN could not be mapped to a ticker (they are listed in the notes at the end).
+
 The history chart compares a deposit-free portfolio index with the S&P 500 in EUR. Each weekly run chains the price return of your current holdings since the previous run, so money you pay in or take out never shows up as performance. The chart appears once four weekly data points with the index exist.
 
 

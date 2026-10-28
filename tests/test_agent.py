@@ -972,3 +972,39 @@ def test_recommendation_ref_prices_uses_history_on_date(monkeypatch):
     conviction = {"APH": {"date": "2026-07-11"}, "GONE": {"date": "2026-07-11"}}
     positions = [{"ticker": "APH", "currency": "EUR"}]
     assert market.recommendation_ref_prices(conviction, positions, {"EUR": 1.0}) == {"APH": 70.0}
+
+
+# ── Holdings freshness and unmapped ISINs ─────────────────────────────────────
+
+def test_holdings_as_of_prefers_env(monkeypatch):
+    monkeypatch.setenv("PORTFOLIO_AS_OF", "2026-06-14")
+    assert market.holdings_as_of() == real_date(2026, 6, 14)
+
+
+def test_holdings_as_of_falls_back_to_file_date(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_AS_OF", raising=False)
+    monkeypatch.setattr(market, "_EXPORT_PATH", tmp_path / "missing.csv")
+    portfolio = tmp_path / "portfolio.csv"
+    portfolio.write_text("ticker\n", encoding="utf-8")
+    assert market.holdings_as_of(str(portfolio)) == real_date.today()
+
+
+def test_load_unmapped_isins_missing_file(tmp_path):
+    assert market.load_unmapped_isins(tmp_path / "unmapped_isins.json") == []
+
+
+def test_email_warns_on_stale_holdings_and_lists_unmapped():
+    html_out = _minimal_email(
+        holdings_as_of=real_date(2020, 1, 1),
+        unmapped=[{"isin": "DE000TEST001", "name": "Test AG"}],
+    )
+    assert "days old" in html_out
+    assert "Holdings as of 01 Jan 2020" in html_out
+    assert "Test AG (DE000TEST001)" in html_out
+    assert "1 holding could not be mapped" in html_out
+
+
+def test_email_no_warning_for_fresh_holdings():
+    html_out = _minimal_email(holdings_as_of=real_date.today())
+    assert "days old" not in html_out
+    assert "could not be mapped" not in html_out

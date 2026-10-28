@@ -42,10 +42,12 @@ from market import (
     generate_charts,
     get_fx_rates,
     get_history_ytd,
+    holdings_as_of,
     is_send_saturday,
     issue_number,
     load_portfolio,
     load_targets,
+    load_unmapped_isins,
     next_portfolio_index,
     recommendation_ref_prices,
 )
@@ -287,6 +289,8 @@ def main() -> None:
             allocation=allocation,
             events=events,
             scorecard=scorecard,
+            holdings_as_of=holdings_as_of(),
+            unmapped=load_unmapped_isins(),
         )
 
         if args.preview:

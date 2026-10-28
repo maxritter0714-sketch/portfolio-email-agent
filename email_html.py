@@ -369,6 +369,34 @@ def _scorecard_html(scorecard: list[dict]) -> str:
     )
 
 
+HOLDINGS_STALE_DAYS = 30
+
+
+def _data_warning_html(today: date, holdings_as_of: date | None, unmapped: list[dict]) -> str:
+    """Banner under the masthead when the holdings data can't be fully trusted."""
+    lines = []
+    if holdings_as_of and (today - holdings_as_of).days > HOLDINGS_STALE_DAYS:
+        lines.append(
+            f"Holdings data is {(today - holdings_as_of).days} days old "
+            f"(exported {holdings_as_of.strftime('%d %b %Y')}). Purchases and sales "
+            f"since then are missing — refresh the Finanzfluss export."
+        )
+    if unmapped:
+        n = len(unmapped)
+        lines.append(
+            f"{n} holding{'s' if n != 1 else ''} could not be mapped to a ticker and "
+            f"{'are' if n != 1 else 'is'} missing from this report — see the notes at the end."
+        )
+    if not lines:
+        return ""
+    return (
+        f'<div class="sect-pad" style="padding:20px 40px 0">'
+        f'<div style="border-left:3px solid {BURGUNDY};padding:10px 14px;'
+        f'font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;'
+        f'color:{BURGUNDY}">{"<br>".join(lines)}</div></div>'
+    )
+
+
 def _optional_sections_html(
     allocation: list[dict], events: list[dict], scorecard: list[dict],
 ) -> str:
@@ -407,8 +435,11 @@ def build_html_email(
     allocation: list[dict] | None = None,
     events: list[dict] | None = None,
     scorecard: list[dict] | None = None,
+    holdings_as_of: date | None = None,
+    unmapped: list[dict] | None = None,
 ) -> str:
     today = date.today()
+    warning_html = _data_warning_html(today, holdings_as_of, unmapped or [])
     today_str = today.strftime("%B %-d, %Y") if os.name != "nt" else today.strftime("%B %d, %Y").replace(" 0", " ")
 
     total = summary["total_value_eur"]
@@ -657,10 +688,19 @@ def build_html_email(
 
     unknown_fx = unknown_fx or []
     skipped = skipped or []
+    unmapped = unmapped or []
     notes_parts: list[str] = []
+    if holdings_as_of:
+        notes_parts.append(f"Holdings as of {holdings_as_of.strftime('%d %b %Y')}.")
     notes_parts.append(
         "Holding and index 1W/2W/1M/YTD figures are euro returns."
     )
+    if unmapped:
+        missing = ", ".join(
+            f"{html.escape(u.get('name') or '?')} ({html.escape(u.get('isin') or '?')})"
+            for u in unmapped
+        )
+        notes_parts.append(f"Not in this report (ISIN not mapped to a ticker): {missing}.")
     if metrics:
         notes_parts.append(
             "Beta, alpha, and correlation are versus the S&P 500 in euro terms."
@@ -748,6 +788,7 @@ def build_html_email(
 </td></tr>
 </table>
 
+{warning_html}
 <!-- The Headline -->
 <div class="sect-pad-top" style="padding:48px 40px 24px">
   <p class="headline-p" style="font-family:Georgia,serif;font-size:22px;line-height:1.45;color:{TEXT_PRIMARY};margin:0">{headline_html}</p>

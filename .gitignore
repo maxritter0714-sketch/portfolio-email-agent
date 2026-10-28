@@ -4,6 +4,7 @@
 # Personal portfolio data
 portfolio.csv
 finanzfluss_export.csv
+finanzfluss_transactions.csv
 
 # Logs & previews
 agent.log
@@ -26,6 +27,7 @@ venv/
 .claude/
 isin_map.json
 targets.json
+unmapped_isins.json
 conviction.json
 history.csv
 
