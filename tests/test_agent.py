@@ -876,6 +876,16 @@ def test_events_from_calendar_handles_empty():
     assert market.events_from_calendar({}, "SXR8.DE", "S&P 500", real_date(2026, 10, 29), 14) == []
 
 
+def test_inline_chart_images_replaces_cid_with_data_uri(tmp_path):
+    from agent import inline_chart_images
+    png = tmp_path / "pie.png"
+    png.write_bytes(b"\x89PNG")
+    html = '<img src="cid:chart_pie@portfolio"><img src="cid:chart_bar@portfolio">'
+    out = inline_chart_images(html, {"pie": str(png), "bar": str(tmp_path / "missing.png")})
+    assert 'src="data:image/png;base64,iVBORw=="' in out
+    assert 'src="cid:chart_bar@portfolio"' in out  # unreadable file stays untouched
+
+
 def test_events_html_caps_rows_and_counts_rest():
     from email_html import _MAX_EVENTS_SHOWN, _events_html
     events = [

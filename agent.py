@@ -7,6 +7,7 @@ every other Saturday (every 14 days from 11 Jan 2025). Bypass with --force.
 """
 
 import argparse
+import base64
 import logging
 import os
 import smtplib
@@ -125,6 +126,19 @@ def send_email(html: str, chart_files: dict[str, str]) -> None:
                 os.remove(filepath)
             except Exception:
                 pass
+
+
+def inline_chart_images(html: str, chart_files: dict[str, str]) -> str:
+    """Swap cid: chart references for data URIs so a browser can show them."""
+    for name, filepath in chart_files.items():
+        try:
+            with open(filepath, "rb") as f:
+                data = base64.b64encode(f.read()).decode("ascii")
+        except OSError as exc:
+            log.warning("Could not inline chart %s: %s", name, exc)
+            continue
+        html = html.replace(f"cid:chart_{name}@portfolio", f"data:image/png;base64,{data}")
+    return html
 
 
 # ── History ───────────────────────────────────────────────────────────────────
@@ -306,7 +320,7 @@ def main() -> None:
 
         if args.preview:
             with open("preview.html", "w", encoding="utf-8") as fh:
-                fh.write(html)
+                fh.write(inline_chart_images(html, charts))
             log.info("Preview written to preview.html (%d chart files in %s)",
                      len(charts), tempfile.gettempdir())
             print("Preview written to preview.html.")
