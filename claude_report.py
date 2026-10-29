@@ -96,10 +96,10 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         top5 = momentum[:5]
         bottom5 = momentum[5:][-5:]
         momentum_text = (
-            f"\n\nMOMENTUM (quartile 4 = strongest, 1 = weakest; score weights "
-            f"3M/6M/12M returns — 1M is shown for context but excluded from "
-            f"the score since short-term moves tend to mean-revert)\n"
-            f"Top:\n" + "\n".join(_fmt_mom(d) for d in top5)
+            "\n\nMOMENTUM (quartile 4 = strongest, 1 = weakest; score weights "
+            "3M/6M/12M returns — 1M is shown for context but excluded from "
+            "the score since short-term moves tend to mean-revert)\n"
+            "Top:\n" + "\n".join(_fmt_mom(d) for d in top5)
         )
         if bottom5:
             momentum_text += "\nBottom:\n" + "\n".join(_fmt_mom(d) for d in bottom5)
@@ -108,11 +108,11 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         amplified = [d for d in lookthrough if d["kind"] == "amplified"]
         hidden = [d for d in lookthrough if d["kind"] == "hidden"]
         lookthrough_text = (
-            f"\n\nLOOK-THROUGH EXPOSURE (factual only, not a risk signal — more or "
-            f"hidden exposure to a name is not inherently good or bad, that depends "
-            f"on the reader's own view of it; ETF top_holdings only covers the "
-            f"largest ~10 constituents per fund, so this is a conservative floor, "
-            f"not exhaustive)\n"
+            "\n\nLOOK-THROUGH EXPOSURE (factual only, not a risk signal — more or "
+            "hidden exposure to a name is not inherently good or bad, that depends "
+            "on the reader's own view of it; ETF top_holdings only covers the "
+            "largest ~10 constituents per fund, so this is a conservative floor, "
+            "not exhaustive)\n"
         )
         if amplified:
             lookthrough_text += (
