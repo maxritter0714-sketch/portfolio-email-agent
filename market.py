@@ -300,28 +300,29 @@ def _naive_dates(series: pd.Series) -> pd.Series:
     return out
 
 
-def _fx_series(currency: str) -> pd.Series | None:
-    """1y daily EUR per 1 unit of `currency`. None means use a constant fallback."""
+def _fx_series(currency: str, period: str = "1y") -> pd.Series | None:
+    """Daily EUR per 1 unit of `currency` over `period`. None means use a constant fallback."""
     ccy = "GBP" if currency in ("GBp", "GBX") else currency
     if ccy == "EUR":
         return None
-    if ccy in _fx_hist_cache:
-        return _fx_hist_cache[ccy]
+    key = ccy if period == "1y" else f"{ccy}:{period}"
+    if key in _fx_hist_cache:
+        return _fx_hist_cache[key]
     pair = _FX_PAIRS.get(ccy)
     if not pair:
         log.warning("No FX pair for %s — constant fallback for EUR conversion", ccy)
-        _fx_hist_cache[ccy] = None
+        _fx_hist_cache[key] = None
         return None
     try:
         sym, invert = pair
-        hist = yf.Ticker(sym).history(period="1y")["Close"].dropna()
+        hist = yf.Ticker(sym).history(period=period)["Close"].dropna()
         rates = (1.0 / hist) if invert else hist
         rates = _naive_dates(rates)
-        _fx_hist_cache[ccy] = rates
+        _fx_hist_cache[key] = rates
         return rates
     except Exception as exc:
         log.warning("Could not fetch FX history for %s (%s)", ccy, exc)
-        _fx_hist_cache[ccy] = None
+        _fx_hist_cache[key] = None
         return None
 
 
@@ -333,15 +334,20 @@ def _constant_eur_rate(currency: str, fx_rates: dict[str, float]) -> float:
     return _FX_FALLBACKS.get(currency, _FX_FALLBACKS["USD"])
 
 
-def _to_eur_close(close: pd.Series, currency: str, fx_rates: dict[str, float]) -> pd.Series:
-    """Convert a native-currency close series to EUR using daily FX when available."""
+def _to_eur_close(close: pd.Series, currency: str, fx_rates: dict[str, float],
+                  fx_period: str = "1y") -> pd.Series:
+    """Convert a native-currency close series to EUR using daily FX when available.
+
+    `fx_period` must cover the price series, otherwise older prices are
+    converted at the oldest available rate.
+    """
     px = _naive_dates(close.astype(float))
     if currency in ("GBp", "GBX"):
         px = px / 100.0
         currency = "GBP"
     if currency == "EUR":
         return px
-    fx = _fx_series(currency)
+    fx = _fx_series(currency, fx_period)
     fallback = _constant_eur_rate(currency, fx_rates)
     if fx is None:
         return px * fallback
@@ -783,6 +789,29 @@ def generate_history_chart() -> str | None:
     return _save_fig(fig, "history_line")
 
 
+def sector_exposure(positions: list[dict]) -> dict[str, float]:
+    """EUR value per sector. ETFs are spread across their underlying sectors via sector_weights."""
+    sec: dict[str, float] = {}
+    for p in positions:
+        weights = p.get("sector_weights")
+        if weights:
+            for sector_name, weight in weights.items():
+                sec[sector_name] = sec.get(sector_name, 0) + p["value_eur"] * weight
+        else:
+            s = p.get("sector") or "Other"
+            sec[s] = sec.get(s, 0) + p["value_eur"]
+    return sec
+
+
+def region_exposure(positions: list[dict]) -> dict[str, float]:
+    """EUR value per region bucket."""
+    geo: dict[str, float] = {}
+    for p in positions:
+        region = p.get("region") or "Other"
+        geo[region] = geo.get(region, 0) + p["value_eur"]
+    return geo
+
+
 def generate_charts(positions: list[dict], summary: dict,
                     benchmarks: list[dict]) -> dict[str, str]:
     charts: dict[str, str] = {}
@@ -803,27 +832,13 @@ def generate_charts(positions: list[dict], summary: dict,
     charts["portfolio_pie"] = _save_fig(fig, "portfolio_pie")
 
     # 2. Sector allocation — top 8 + Others
-    # ETFs are distributed across their actual underlying sectors via sector_weights.
-    sec: dict[str, float] = {}
-    for p in positions:
-        weights = p.get("sector_weights")
-        if weights:
-            for sector_name, weight in weights.items():
-                sec[sector_name] = sec.get(sector_name, 0) + p["value_eur"] * weight
-        else:
-            s = p.get("sector") or "Other"
-            sec[s] = sec.get(s, 0) + p["value_eur"]
-    labels, sizes = _prepare_pie(list(sec.items()), max_slices=8)
+    labels, sizes = _prepare_pie(list(sector_exposure(positions).items()), max_slices=8)
     fig, ax = plt.subplots(figsize=(7, 6.5))
     _pie(ax, sizes, labels)
     charts["sector_pie"] = _save_fig(fig, "sector_pie")
 
     # 3. Geographic allocation — top 8 + Others
-    geo: dict[str, float] = {}
-    for p in positions:
-        region = p.get("region") or "Other"
-        geo[region] = geo.get(region, 0) + p["value_eur"]
-    labels, sizes = _prepare_pie(list(geo.items()), max_slices=8)
+    labels, sizes = _prepare_pie(list(region_exposure(positions).items()), max_slices=8)
     fig, ax = plt.subplots(figsize=(7, 6.5))
     _pie(ax, sizes, labels)
     charts["geo_pie"] = _save_fig(fig, "geo_pie")

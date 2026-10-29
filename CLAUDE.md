@@ -10,6 +10,9 @@ Stack: Python · yfinance · NewsAPI · Anthropic Claude · Gmail SMTP
 | `agent.py` | CLI: schedule, orchestration, Gmail send |
 | `market.py` | Portfolio load, FX, prices, history, charts, send cadence |
 | `metrics.py` | Sharpe/beta/momentum/look-through |
+| `dashboard.py` | CLI: builds the interactive dashboard `output/dashboard.html` (prices only, no Claude) |
+| `analytics.py` | Pure backtest/risk/XIRR calculations for the dashboard |
+| `templates/dashboard.html` | Dashboard layout and JS (Plotly); data injected as JSON |
 | `news.py` | NewsAPI + Haiku relevance filter |
 | `claude_report.py` | Claude analysis, headline, conviction |
 | `email_html.py` | HTML email builder |
@@ -18,7 +21,7 @@ Stack: Python · yfinance · NewsAPI · Anthropic Claude · Gmail SMTP
 | `import_cashflows.py` | Reduces the Finanzfluss transactions export → daily `data/cashflows.csv` (only invested + dividends; private spending stays local) |
 | `paths.py` | `DATA_DIR` (`data/`) and `OUTPUT_DIR` (`output/`) — all file locations hang off these |
 | `data/` | All personal files, gitignored except `*.example`: `finanzfluss_export.csv`, `portfolio.csv`, `history.csv`, `conviction.json`, `cashflows.csv`, `isin_map.json`, `targets.json` |
-| `output/` | `agent.log`, `preview.html` (gitignored) |
+| `output/` | `agent.log`, `preview.html`, `dashboard.html` (gitignored) |
 | `.env` | API keys and Gmail credentials (never commit) |
 | `requirements.txt` | Python dependencies |
 

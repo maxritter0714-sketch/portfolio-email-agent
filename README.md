@@ -256,3 +256,20 @@ This writes `data/cashflows.csv` with only daily totals of money invested (buys 
 
 The same data drives the **Total** figure in the masthead: current value minus everything paid in since the first booking, so it includes realised gains and losses of sold positions. This only holds if every purchase ran through that one cash account and the export covers its full history — positions bought through another broker or moved in by a securities transfer (Depotübertrag) would show up as gains. Without `cashflows.csv` the Total figure is simply left out.
 
+
+## 10 — Interactive dashboard (optional)
+
+Next to the email, you can build a performance dashboard for your browser:
+
+```bash
+python dashboard.py --open
+```
+
+This writes `output/dashboard.html`, a single file you open locally (it loads Plotly from a CDN, so it needs an internet connection to display). It fetches prices only — no Claude, no news, no email — and takes about half a minute. Sections:
+
+- **Your actual record** — net paid in vs value, total gain and your money-weighted return p.a. (XIRR), from `cashflows.csv` and `history.csv` (section 9).
+- **Backtest of today's portfolio** — today's share counts held unchanged over up to 7 years against the S&P 500 and MSCI World (total return, in EUR): range buttons, drawdown, returns by period, monthly heatmap, risk table (Sharpe, Sortino, beta, tracking error, capture ratios, VaR…) and rolling metrics. This shows how your current holdings behave, not your actual past performance.
+- **Positions** — sortable table with return and contribution per period, volatility, beta, risk share and momentum.
+- **Structure** — concentration, diversification ratio, sectors, regions, weight vs risk share and a correlation heatmap.
+
+The file contains your holdings and euro amounts. Keep it local, or host it only behind a login.
