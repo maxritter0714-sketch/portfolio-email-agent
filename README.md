@@ -13,7 +13,7 @@ The report includes live prices, P&L, benchmark comparison, curated news, and a 
 
 ## Prerequisites
 
-- Python 3.10 or newer
+- Python 3.11 or newer
 - A Gmail account with 2-Step Verification enabled
 
 ---
