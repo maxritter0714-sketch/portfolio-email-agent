@@ -3,8 +3,7 @@
 
 # Personal portfolio data
 portfolio.csv
-finanzfluss_export.csv
-finanzfluss_transactions.csv
+finanzfluss_*.csv*
 cashflows.csv
 
 # Logs & previews
