@@ -115,7 +115,7 @@ You should receive an email within about 30 seconds. Check `agent.log` if someth
 
 The cleanest setup — runs in the cloud, no local machine required, secrets stored encrypted.
 
-1. Create a private GitHub repo (e.g. `portfolio-agent-data`) and upload your `finanzfluss_export.csv`, `history.csv`, and `conviction.json` there. If you use Finanzfluss import overrides, also upload your `isin_map.json` (see [step 7](#7--update-your-holdings-finanzfluss-users)) — otherwise it won't be picked up by cloud runs
+1. Create a private GitHub repo (e.g. `portfolio-agent-data`) and upload your holdings there: either `finanzfluss_export.csv` (converted on every run) or a hand-kept `portfolio.csv` (used as is). `history.csv` and `conviction.json` are created by the first run — only upload them if you already have them from local runs. If you use Finanzfluss import overrides, also upload your `isin_map.json` (see [step 7](#7--update-your-holdings-finanzfluss-users)) — otherwise it won't be picked up by cloud runs
 2. Create a fine-grained Personal Access Token scoped to that private repo with **Contents: Read and write**
 3. Add secrets to your public repo under **Settings → Secrets and variables → Actions**:
    - `DATA_REPO_TOKEN` — the PAT from step 2

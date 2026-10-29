@@ -28,13 +28,19 @@ jobs:
 
       - name: Copy data files into working directory
         run: |
-          cp _data/finanzfluss_export.csv .
+          # Finanzfluss export if present, else a hand-kept portfolio.csv (fails if neither)
+          if [ -f _data/finanzfluss_export.csv ]; then
+            holdings=finanzfluss_export.csv
+          else
+            holdings=portfolio.csv
+          fi
+          cp "_data/$holdings" .
           cp _data/history.csv . 2>/dev/null || true
           cp _data/conviction.json . 2>/dev/null || true
           cp _data/isin_map.json . 2>/dev/null || true
           cp _data/targets.json . 2>/dev/null || true
           cp _data/cashflows.csv . 2>/dev/null || true
-          echo "PORTFOLIO_AS_OF=$(git -C _data log -1 --format=%cs -- finanzfluss_export.csv)" >> "$GITHUB_ENV"
+          echo "PORTFOLIO_AS_OF=$(git -C _data log -1 --format=%cs -- "$holdings")" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -46,6 +52,7 @@ jobs:
         run: pip install -r requirements.txt --quiet
 
       - name: Convert Finanzfluss export to portfolio.csv
+        if: ${{ hashFiles('finanzfluss_export.csv') != '' }}
         env:
           OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
         run: python import_portfolio.py --input finanzfluss_export.csv --allow-missing
