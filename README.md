@@ -252,3 +252,5 @@ python import_cashflows.py --input finanzfluss_transactions.csv
 
 This writes `cashflows.csv` with only daily totals of money invested (buys minus sells) and dividends/interest — private spending, counterparties and transfers are dropped. Upload `cashflows.csv` (never the raw export) to your private data repo for GitHub Actions. The split runs from the first history entry of the current year, and the email warns when the cash-flow data is more than 30 days old. Both files are gitignored.
 
+The same data drives the **Total** figure in the masthead: current value minus everything paid in since the first booking, so it includes realised gains and losses of sold positions. This only holds if every purchase ran through that one cash account and the export covers its full history — positions bought through another broker or moved in by a securities transfer (Depotübertrag) would show up as gains. Without `cashflows.csv` the Total figure is simply left out.
+

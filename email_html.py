@@ -110,10 +110,24 @@ def _eur_signed(val: float, decimals: int = 0) -> str:
     return f"{sign}€{abs(val):,.{decimals}f}"
 
 
-def _mast_stat_cell(label: str, pct: float, width: str, caption: str = "") -> str:
+def _pl_from_pct(value: float, pct: float) -> float:
+    """Euro change behind a return that ended at `value`."""
+    denom = 100.0 + pct
+    return value * pct / denom if denom else 0.0
+
+
+def _mast_stat_cell(
+    label: str, pct: float, width: str, caption: str = "", amount: float | None = None,
+) -> str:
     extra = ""
+    if amount is not None:
+        extra += (
+            f'<div style="font-family:Georgia,serif;font-size:12px;'
+            f'color:{TEXT_SECONDARY};margin-top:4px;font-variant-numeric:tabular-nums">'
+            f"{_eur_signed(amount)}</div>"
+        )
     if caption:
-        extra = (
+        extra += (
             f'<div style="font-family:Arial,Helvetica,sans-serif;font-size:8px;'
             f'color:{TEXT_SECONDARY};margin-top:4px;line-height:1.3">{caption}</div>'
         )
@@ -489,27 +503,24 @@ def build_html_email(
 
     total = summary["total_value_eur"]
     fortnight_pct = summary["fortnight_pct"]
-    denom = 100.0 + fortnight_pct
-    fortnight_pl = total * fortnight_pct / denom if denom else 0.0
+    fortnight_pl = _pl_from_pct(total, fortnight_pct)
     fortnight_color = _color(fortnight_pl)
-    weekly_pct   = summary["weekly_pct"]
-    ytd_pct      = summary["ytd_pct"]
     vs_jan       = summary.get("value_vs_jan_pct")
+    lifetime     = summary.get("lifetime")
+    # (label, pct, euro amount, caption); fortnight already leads the masthead.
+    stats = [
+        (label, summary[key], _pl_from_pct(total, summary[key]), "")
+        for label, key in (("Weekly", "weekly_pct"), ("Monthly", "monthly_pct"), ("YTD", "ytd_pct"))
+    ]
+    if lifetime:
+        stats.append(("Total", lifetime["pct"], lifetime["gain"], ""))
     if vs_jan is not None:
-        mast_w = "25%"
-        mast_stats = (
-            _mast_stat_cell("Weekly", weekly_pct, mast_w)
-            + _mast_stat_cell("Fortnight", fortnight_pct, mast_w)
-            + _mast_stat_cell("YTD", ytd_pct, mast_w)
-            + _mast_stat_cell("Vs January", vs_jan, mast_w, "Includes cash in/out")
-        )
-    else:
-        mast_w = "33%"
-        mast_stats = (
-            _mast_stat_cell("Weekly", weekly_pct, mast_w)
-            + _mast_stat_cell("Fortnight", fortnight_pct, mast_w)
-            + _mast_stat_cell("YTD", ytd_pct, mast_w)
-        )
+        stats.append(("Vs January", vs_jan, None, "Includes cash in/out"))
+    mast_w = f"{100 // len(stats)}%"
+    mast_stats = "".join(
+        _mast_stat_cell(label, pct, mast_w, caption, amount)
+        for label, pct, amount, caption in stats
+    )
 
     # ── Headline ──────────────────────────────────────────────────────────────
     headline_html = _emphasize_numbers(headline)

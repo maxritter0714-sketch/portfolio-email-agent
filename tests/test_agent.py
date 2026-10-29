@@ -631,6 +631,26 @@ def test_masthead_shows_vs_january_beside_price_ytd():
     assert "Includes cash in/out" in html_out
 
 
+def test_masthead_stats_show_euro_amounts_and_lifetime_total():
+    lifetime = dict(since=real_date(2022, 8, 16), invested=8_000.0, gain=2_000.0, pct=25.0, income=0.0)
+    html_out = _minimal_email(
+        summary=dict(
+            total_value_eur=10_800.0,
+            fortnight_pct=1.0,
+            monthly_pct=8.0,
+            weekly_pct=0.5,
+            ytd_pct=8.0,
+            portfolio_yield_pct=1.2,
+            lifetime=lifetime,
+        ),
+    )
+    stats_row = html_out[html_out.index(">Weekly<"):]
+    assert ">Monthly<" in stats_row and ">Fortnight<" not in stats_row
+    assert "+€800" in stats_row  # 8% gain ending at €10,800
+    assert ">Total<" in stats_row and "+25.00%" in stats_row and "+€2,000" in stats_row
+    assert "width:25%" in stats_row
+
+
 def test_value_vs_jan_line_empty_when_missing():
     assert _value_vs_jan_line({"ytd_pct": 8.0}) == ""
 
@@ -874,6 +894,27 @@ def test_events_from_calendar_keeps_only_window():
 
 def test_events_from_calendar_handles_empty():
     assert market.events_from_calendar({}, "SXR8.DE", "S&P 500", real_date(2026, 10, 29), 14) == []
+
+
+def test_lifetime_return_uses_all_cash_flows():
+    flows = [
+        dict(date="2022-08-16", invested_eur=1000.0, income_eur=0.0),
+        dict(date="2025-03-01", invested_eur=-200.0, income_eur=5.0),
+        dict(date="2026-10-28", invested_eur=0.0, income_eur=0.0),
+    ]
+    lt = market.lifetime_return(1000.0, flows)
+    assert lt["since"] == real_date(2022, 8, 16)
+    assert lt["invested"] == pytest.approx(800.0)
+    assert lt["gain"] == pytest.approx(200.0)
+    assert lt["pct"] == pytest.approx(25.0)
+    assert lt["income"] == pytest.approx(5.0)
+    assert market.lifetime_return(1000.0, []) is None
+
+
+def test_value_vs_jan_line_appends_lifetime():
+    lt = dict(since=real_date(2022, 8, 16), invested=800.0, gain=200.0, pct=25.0, income=5.0)
+    line = _value_vs_jan_line({"lifetime": lt})
+    assert "Total gain since first purchase (2022-08-16): €+200 (+25.00%)" in line
 
 
 def test_inline_chart_images_replaces_cid_with_data_uri(tmp_path):

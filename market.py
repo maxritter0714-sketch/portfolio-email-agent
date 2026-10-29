@@ -1038,6 +1038,28 @@ def value_change_breakdown(
     )
 
 
+def lifetime_return(current_value: float, cashflows: list[dict]) -> dict | None:
+    """Gain since the first cash-flow booking: value minus everything net paid in.
+
+    Unlike the cost-basis P&L this includes realised gains and losses of sold
+    positions. Assumes every purchase ran through the tracked cash account.
+    None without cash-flow data or when nothing was paid in.
+    """
+    if not cashflows:
+        return None
+    invested = sum(c["invested_eur"] for c in cashflows)
+    if invested <= 0:
+        return None
+    gain = current_value - invested
+    return dict(
+        since=date.fromisoformat(cashflows[0]["date"]),
+        invested=invested,
+        gain=gain,
+        pct=gain / invested * 100,
+        income=sum(c["income_eur"] for c in cashflows),
+    )
+
+
 def get_history_ytd(current_value: float) -> float | None:
     """Book-value change vs the first January snapshot in history.csv, or None.
 

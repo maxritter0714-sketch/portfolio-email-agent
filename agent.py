@@ -46,6 +46,7 @@ from market import (
     holdings_as_of,
     is_send_saturday,
     issue_number,
+    lifetime_return,
     load_portfolio,
     load_cashflows,
     load_targets,
@@ -226,8 +227,14 @@ def main() -> None:
         positions, summary, unknown_fx, skipped = fetch_portfolio_data(rows, fx_rates)
         positions.sort(key=lambda p: p["value_eur"], reverse=True)
 
-        breakdown = value_change_breakdown(summary["total_value_eur"], load_cashflows())
+        cashflows = load_cashflows()
+        breakdown = value_change_breakdown(summary["total_value_eur"], cashflows)
         summary["value_breakdown"] = breakdown
+        lifetime = lifetime_return(summary["total_value_eur"], cashflows)
+        summary["lifetime"] = lifetime
+        if lifetime:
+            log.info("Gain since %s: %+.0f EUR (%+.2f%%) on %.0f EUR paid in",
+                     lifetime["since"], lifetime["gain"], lifetime["pct"], lifetime["invested"])
         if breakdown:
             # Supersedes vs-January, which mixes deposits into the change.
             summary["value_vs_jan_pct"] = None

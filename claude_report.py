@@ -24,21 +24,34 @@ def claude_model() -> str:
     return os.getenv("CLAUDE_MODEL", "").strip() or DEFAULT_CLAUDE_MODEL
 
 
+def _lifetime_line(summary: dict) -> str:
+    lt = summary.get("lifetime")
+    if not lt:
+        return ""
+    return (
+        f"\nTotal gain since first purchase ({lt['since'].isoformat()}): "
+        f"€{lt['gain']:+,.0f} ({lt['pct']:+.2f}%) on €{lt['invested']:,.0f} net paid in "
+        "(includes realised gains/losses; not time-weighted)"
+    )
+
+
 def _value_vs_jan_line(summary: dict) -> str:
     b = summary.get("value_breakdown")
+    vs_jan = summary.get("value_vs_jan_pct")
     if b:
-        return (
+        line = (
             f"\nValue change since {b['since'].isoformat()}: €{b['change']:+,.0f} "
             f"(net paid in €{b['invested']:+,.0f}, market gain €{b['market']:+,.0f}; "
             f"dividends/interest to cash €{b['income']:+,.0f})"
         )
-    vs_jan = summary.get("value_vs_jan_pct")
-    if vs_jan is None:
-        return ""
-    return (
-        f"\nBook value vs January snapshot: {vs_jan:+.2f}% "
-        "(includes deposits/withdrawals; not a time-weighted return)"
-    )
+    elif vs_jan is not None:
+        line = (
+            f"\nBook value vs January snapshot: {vs_jan:+.2f}% "
+            "(includes deposits/withdrawals; not a time-weighted return)"
+        )
+    else:
+        line = ""
+    return line + _lifetime_line(summary)
 
 
 # ── Claude analysis ───────────────────────────────────────────────────────────
@@ -138,7 +151,8 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
     return (
         f"PORTFOLIO SUMMARY\n"
         f"Total value: €{summary['total_value_eur']:,.2f} | "
-        f"Total P&L: €{summary['total_pl_eur']:+,.2f} ({summary['total_pl_pct']:+.2f}%)\n"
+        f"Unrealised P&L vs cost basis (held positions only): "
+        f"€{summary['total_pl_eur']:+,.2f} ({summary['total_pl_pct']:+.2f}%)\n"
         f"Weekly: {summary['weekly_pct']:+.2f}% | Fortnight: {summary['fortnight_pct']:+.2f}% | "
         f"Monthly: {summary['monthly_pct']:+.2f}% | "
         f"YTD (price, current holdings): {summary['ytd_pct']:+.2f}%"
@@ -366,7 +380,8 @@ def call_claude_headline(summary: dict, benchmarks: list[dict], metrics: dict) -
         f"Portfolio monthly: {summary['monthly_pct']:+.2f}%\n"
         f"Portfolio YTD (price, current holdings): {summary['ytd_pct']:+.2f}%"
         f"{_value_vs_jan_line(summary)}\n"
-        f"Total P&L: €{summary['total_pl_eur']:+,.0f} ({summary['total_pl_pct']:+.2f}%)\n"
+        f"Unrealised P&L vs cost basis (held positions only): "
+        f"€{summary['total_pl_eur']:+,.0f} ({summary['total_pl_pct']:+.2f}%)\n"
         f"{bench_lines}\n"
         f"{metrics_line}"
     )
