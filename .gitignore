@@ -1,14 +1,17 @@
 ﻿# Secrets
 .env
 
-# Personal portfolio data
-portfolio.csv
+# Personal portfolio data — everything in data/ except the templates
+data/*
+!data/*.example
+
+# Safety net: private drops saved next to the code by mistake
 finanzfluss_*.csv*
-cashflows.csv
+/*.csv
+/*.json
 
 # Logs & previews
-agent.log
-preview.html
+output/
 
 # Python
 __pycache__/
@@ -25,9 +28,3 @@ venv/
 
 # Claude Code internal
 .claude/
-isin_map.json
-targets.json
-unmapped_isins.json
-conviction.json
-history.csv
-

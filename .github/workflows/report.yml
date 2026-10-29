@@ -26,7 +26,7 @@ jobs:
           path: _data
           fetch-depth: 0  # full history, to date the last export commit
 
-      - name: Copy data files into working directory
+      - name: Copy data files into data/
         run: |
           # Finanzfluss export if present, else a hand-kept portfolio.csv (fails if neither)
           if [ -f _data/finanzfluss_export.csv ]; then
@@ -34,12 +34,10 @@ jobs:
           else
             holdings=portfolio.csv
           fi
-          cp "_data/$holdings" .
-          cp _data/history.csv . 2>/dev/null || true
-          cp _data/conviction.json . 2>/dev/null || true
-          cp _data/isin_map.json . 2>/dev/null || true
-          cp _data/targets.json . 2>/dev/null || true
-          cp _data/cashflows.csv . 2>/dev/null || true
+          cp "_data/$holdings" data/
+          for f in history.csv conviction.json isin_map.json targets.json cashflows.csv; do
+            cp "_data/$f" data/ 2>/dev/null || true
+          done
           echo "PORTFOLIO_AS_OF=$(git -C _data log -1 --format=%cs -- "$holdings")" >> "$GITHUB_ENV"
 
       - name: Set up Python
@@ -52,10 +50,10 @@ jobs:
         run: pip install -r requirements.txt --quiet
 
       - name: Convert Finanzfluss export to portfolio.csv
-        if: ${{ hashFiles('finanzfluss_export.csv') != '' }}
+        if: ${{ hashFiles('data/finanzfluss_export.csv') != '' }}
         env:
           OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
-        run: python import_portfolio.py --input finanzfluss_export.csv --allow-missing
+        run: python import_portfolio.py --input data/finanzfluss_export.csv --allow-missing
 
       - name: Collect weekly data point
         env:
@@ -82,8 +80,8 @@ jobs:
         # Runs even if the report step failed, so the weekly data point isn't lost.
         if: ${{ !cancelled() }}
         run: |
-          cp history.csv _data/ 2>/dev/null || true
-          cp conviction.json _data/ 2>/dev/null || true
+          cp data/history.csv _data/ 2>/dev/null || true
+          cp data/conviction.json _data/ 2>/dev/null || true
           cd _data
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

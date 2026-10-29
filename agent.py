@@ -33,6 +33,7 @@ from claude_report import (
     split_analysis,
 )
 from email_html import build_html_email
+from paths import OUTPUT_DIR
 from market import (
     _hist_cache,
     append_history,
@@ -70,11 +71,12 @@ from news import (
 load_dotenv()
 
 # ── Logging ───────────────────────────────────────────────────────────────────
+OUTPUT_DIR.mkdir(exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler("agent.log"),
+        logging.FileHandler(OUTPUT_DIR / "agent.log"),
         logging.StreamHandler(sys.stdout),
     ],
 )
@@ -182,7 +184,7 @@ def main() -> None:
     if args.data_only:
         log.info("=== Portfolio Agent (data-only) ===")
         try:
-            rows = load_portfolio("portfolio.csv")
+            rows = load_portfolio()
             fx_rates = get_fx_rates()
             positions, summary, unknown_fx, skipped = fetch_portfolio_data(rows, fx_rates)
             if skipped:
@@ -218,7 +220,7 @@ def main() -> None:
     log.info("=== Portfolio Agent starting ===")
 
     try:
-        rows = load_portfolio("portfolio.csv")
+        rows = load_portfolio()
 
         log.info("Fetching FX rates…")
         fx_rates = get_fx_rates()
@@ -326,11 +328,11 @@ def main() -> None:
         )
 
         if args.preview:
-            with open("preview.html", "w", encoding="utf-8") as fh:
+            with open(OUTPUT_DIR / "preview.html", "w", encoding="utf-8") as fh:
                 fh.write(inline_chart_images(html, charts))
-            log.info("Preview written to preview.html (%d chart files in %s)",
+            log.info("Preview written to %s (%d chart files in %s)", OUTPUT_DIR / "preview.html",
                      len(charts), tempfile.gettempdir())
-            print("Preview written to preview.html.")
+            print(f"Preview written to {OUTPUT_DIR / 'preview.html'}.")
             # Clean up temp charts
             for fp in charts.values():
                 try:

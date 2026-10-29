@@ -6,17 +6,16 @@ import logging
 import os
 import re
 from datetime import date, timedelta
-from pathlib import Path
-
 import anthropic
 
 from news import _extract_text_from_response, _first_token, _word_in
+from paths import DATA_DIR
 
 log = logging.getLogger(__name__)
 
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-5"
 _CONVICTION_MAX_AGE_DAYS = 182  # older recommendations are dropped
-_CONVICTION_PATH = Path("conviction.json")
+_CONVICTION_PATH = DATA_DIR / "conviction.json"
 
 
 def claude_model() -> str:

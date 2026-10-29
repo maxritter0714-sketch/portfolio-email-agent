@@ -15,7 +15,7 @@ Set OPENFIGI_API_KEY in .env for higher rate limits (250 req/min vs 25).
 
 Usage:
     python import_portfolio.py --input my-export.csv
-    python import_portfolio.py --input my-export.csv --output portfolio.csv
+    python import_portfolio.py --input my-export.csv --output data/portfolio.csv
     python import_portfolio.py --input my-export.csv --quiet
 """
 
@@ -28,6 +28,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+
+from paths import DATA_DIR
 
 from dotenv import load_dotenv
 
@@ -80,9 +82,9 @@ UNMAPPED_FILENAME = "unmapped_isins.json"
 # Loaded from isin_map.json (gitignored) at startup.
 # Use this to correct cases where OpenFIGI picks the wrong exchange listing --
 # most common with ETFs that trade on multiple exchanges.
-# Copy isin_map.json.example to isin_map.json and add your own ISINs.
+# Copy data/isin_map.json.example to data/isin_map.json and add your own ISINs.
 ISIN_TO_TICKER: dict[str, str] = {}
-_isin_map_path = Path("isin_map.json")
+_isin_map_path = DATA_DIR / "isin_map.json"
 if _isin_map_path.exists():
     ISIN_TO_TICKER.update(json.loads(_isin_map_path.read_text(encoding="utf-8-sig")))
 
@@ -247,7 +249,7 @@ def read_export_csv(filepath: str) -> list[dict]:
 
 def convert(
     input_path: str,
-    output_path: str = "portfolio.csv",
+    output_path: str | Path = DATA_DIR / "portfolio.csv",
     cfg: ExportConfig = FINANZFLUSS,
     verbose: bool = True,
 ) -> tuple[int, list[str]]:
@@ -353,8 +355,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--output",
-        default="portfolio.csv",
-        help="Path for the output portfolio.csv (default: portfolio.csv)",
+        default=str(DATA_DIR / "portfolio.csv"),
+        help="Path for the output portfolio.csv (default: %(default)s)",
     )
     parser.add_argument(
         "--quiet",

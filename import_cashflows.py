@@ -13,8 +13,8 @@ is dropped, so cashflows.csv is safe to upload to the private data repo
 while the raw export stays on this machine.
 
 Usage:
-    python import_cashflows.py --input finanzfluss_transactions.csv
-    python import_cashflows.py --input finanzfluss_transactions.csv --account "Trade Republic Verrechnungskonto"
+    python import_cashflows.py --input data/finanzfluss_transactions.csv
+    python import_cashflows.py --input data/finanzfluss_transactions.csv --account "Trade Republic Verrechnungskonto"
 """
 
 import argparse
@@ -23,6 +23,8 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+
+from paths import DATA_DIR
 
 DEFAULT_ACCOUNT = "Trade Republic Verrechnungskonto"
 INVESTED_CATEGORY = "Wertpapieranlage"
@@ -63,7 +65,7 @@ def daily_cashflows(rows: list[dict], account: str = DEFAULT_ACCOUNT) -> list[di
     ]
 
 
-def convert(input_path: str, output_path: str = "cashflows.csv",
+def convert(input_path: str, output_path: str | Path = DATA_DIR / "cashflows.csv",
             account: str = DEFAULT_ACCOUNT) -> int:
     """Write cashflows.csv; returns the number of days written."""
     path = Path(input_path)
@@ -85,7 +87,8 @@ def main() -> None:
         description="Reduce a Finanzfluss transactions export to daily portfolio cash flows"
     )
     parser.add_argument("--input", required=True, help="Finanzfluss transactions export CSV")
-    parser.add_argument("--output", default="cashflows.csv", help="Output path (default: cashflows.csv)")
+    parser.add_argument("--output", default=str(DATA_DIR / "cashflows.csv"),
+                        help="Output path (default: %(default)s)")
     parser.add_argument("--account", default=DEFAULT_ACCOUNT,
                         help=f'Cash account to read (default: "{DEFAULT_ACCOUNT}")')
     args = parser.parse_args()

@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from paths import DATA_DIR
 from theme import (
     BG_CHART, BURGUNDY, DARK_GOLD, NAVY, SAGE,
     TEXT_PRIMARY, TEXT_SECONDARY, _PALETTE,
@@ -149,7 +150,7 @@ def issue_number(today: date | None = None) -> int:
 
 
 # ── Portfolio loading ─────────────────────────────────────────────────────────
-def load_portfolio(filepath: str = "portfolio.csv") -> list[dict]:
+def load_portfolio(filepath: str | Path = DATA_DIR / "portfolio.csv") -> list[dict]:
     if not os.path.exists(filepath):
         log.error("portfolio.csv not found at '%s'", filepath)
         print(
@@ -185,11 +186,11 @@ def load_portfolio(filepath: str = "portfolio.csv") -> list[dict]:
     return rows
 
 
-_EXPORT_PATH = Path("finanzfluss_export.csv")
-_UNMAPPED_PATH = Path("unmapped_isins.json")
+_EXPORT_PATH = DATA_DIR / "finanzfluss_export.csv"
+_UNMAPPED_PATH = DATA_DIR / "unmapped_isins.json"
 
 
-def holdings_as_of(portfolio_path: str = "portfolio.csv") -> date | None:
+def holdings_as_of(portfolio_path: str | Path = DATA_DIR / "portfolio.csv") -> date | None:
     """Date the holdings were last exported.
 
     In GitHub Actions the workflow sets PORTFOLIO_AS_OF from the data repo's
@@ -599,7 +600,7 @@ def _pie(ax, sizes: list[float], labels: list[str]) -> None:
     )
 
 
-_HISTORY_PATH = Path("history.csv")
+_HISTORY_PATH = DATA_DIR / "history.csv"
 _HISTORY_COLS = (
     "date", "issue", "total_value_eur", "sp500_close", "datetime", "source",
     "port_index", "sp500_eur",
@@ -931,7 +932,7 @@ def fetch_upcoming_events(positions: list[dict], days: int = 14) -> list[dict]:
 
 
 # ── Target allocation ─────────────────────────────────────────────────────────
-_TARGETS_PATH = Path("targets.json")
+_TARGETS_PATH = DATA_DIR / "targets.json"
 _UNASSIGNED = "Unassigned"
 
 
@@ -982,7 +983,7 @@ def compute_allocation_drift(positions: list[dict], targets: dict) -> list[dict]
 
 
 # ── Value change breakdown ────────────────────────────────────────────────────
-_CASHFLOWS_PATH = Path("cashflows.csv")
+_CASHFLOWS_PATH = DATA_DIR / "cashflows.csv"
 
 
 def load_cashflows(path: Path = _CASHFLOWS_PATH) -> list[dict]:
