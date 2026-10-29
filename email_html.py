@@ -312,9 +312,14 @@ def _allocation_html(allocation: list[dict]) -> str:
     )
 
 
+_MAX_EVENTS_SHOWN = 12
+
+
 def _events_html(events: list[dict]) -> str:
+    """Earliest events as a table; the rest collapse into a '+ N more' line."""
+    shown, hidden = events[:_MAX_EVENTS_SHOWN], len(events) - _MAX_EVENTS_SHOWN
     rows = ""
-    for e in events:
+    for e in shown:
         rows += (
             "<tr>"
             + _small_td(e["date"].strftime("%a %d %b"))
@@ -325,10 +330,17 @@ def _events_html(events: list[dict]) -> str:
             )
             + "</tr>"
         )
+    more = ""
+    if hidden > 0:
+        more = (
+            f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:11px;'
+            f'color:{TEXT_SECONDARY};margin:12px 0 0">'
+            f'+ {hidden} more in the next 14 days</p>'
+        )
     return (
         '<table width="100%" cellpadding="0" cellspacing="0"><thead><tr>'
         + _small_th("Date") + _small_th("Event") + _small_th("Holding")
-        + f"</tr></thead><tbody>{rows}</tbody></table>"
+        + f"</tr></thead><tbody>{rows}</tbody></table>{more}"
     )
 
 

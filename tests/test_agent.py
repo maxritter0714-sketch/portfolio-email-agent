@@ -876,6 +876,18 @@ def test_events_from_calendar_handles_empty():
     assert market.events_from_calendar({}, "SXR8.DE", "S&P 500", real_date(2026, 10, 29), 14) == []
 
 
+def test_events_html_caps_rows_and_counts_rest():
+    from email_html import _MAX_EVENTS_SHOWN, _events_html
+    events = [
+        dict(date=real_date(2026, 11, 2), ticker=f"T{i}", name=f"Name {i}", kind="Earnings")
+        for i in range(_MAX_EVENTS_SHOWN + 3)
+    ]
+    out = _events_html(events)
+    assert out.count("<tr>") == _MAX_EVENTS_SHOWN + 1  # + header row
+    assert "+ 3 more in the next 14 days" in out
+    assert "more in the next" not in _events_html(events[:_MAX_EVENTS_SHOWN])
+
+
 # ── Target allocation ─────────────────────────────────────────────────────────
 
 def test_allocation_drift_groups_and_flags():
