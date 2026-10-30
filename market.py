@@ -446,6 +446,12 @@ def get_price_changes(
     return current, weekly_pct, fortnight_pct, monthly_pct, ytd_pct, currency, info, sector_weights, holdings_weights, div_ttm_native
 
 
+def _expense_ratio(info: dict) -> float | None:
+    """ETF ongoing charge as a fraction (Yahoo reports percent, 0.07 = 0.07 %); None for stocks."""
+    ter = info.get("netExpenseRatio") if info.get("quoteType") == "ETF" else None
+    return ter / 100 if isinstance(ter, (int, float)) else None
+
+
 def fetch_portfolio_data(
     rows: list[dict], fx_rates: dict[str, float]
 ) -> tuple[list[dict], dict, list[dict], list[dict]]:
@@ -493,6 +499,7 @@ def fetch_portfolio_data(
                 sector_weights=sector_weights,
                 holdings_weights=holdings_weights,
                 dividend_ttm_eur=dividend_ttm_eur,
+                expense_ratio=_expense_ratio(info),
             )
         )
 
@@ -810,6 +817,44 @@ def region_exposure(positions: list[dict]) -> dict[str, float]:
         region = p.get("region") or "Other"
         geo[region] = geo.get(region, 0) + p["value_eur"]
     return geo
+
+
+# Rough currency mix behind each region bucket (index weights, rounded). Buckets
+# group currencies that move together against the euro.
+_CCY_GROUP = {"EUR": "EUR", "USD": "USD", "JPY": "JPY", "HKD": "CNY / HKD", "CNY": "CNY / HKD",
+              "GBP": "GBP / CHF / Nordic", "CHF": "GBP / CHF / Nordic", "DKK": "GBP / CHF / Nordic",
+              "SEK": "GBP / CHF / Nordic", "NOK": "GBP / CHF / Nordic",
+              "CAD": "CAD / AUD", "AUD": "CAD / AUD"}
+_REGION_CURRENCIES: dict[str, dict[str, float]] = {
+    "Global": {"USD": 0.72, "EUR": 0.08, "JPY": 0.055, "GBP / CHF / Nordic": 0.08,
+               "CAD / AUD": 0.045, "Other": 0.02},
+    "North America": {"USD": 1.0},
+    "Europe": {"EUR": 0.55, "GBP / CHF / Nordic": 0.45},
+    "Japan": {"JPY": 1.0},
+    "China / HK": {"CNY / HKD": 1.0},
+    "Emerging Markets": {"CNY / HKD": 0.27, "EM & other Asia": 0.73},
+    "Asia Pacific": {"EM & other Asia": 1.0},
+    "Latin America": {"EM & other Asia": 1.0},
+}
+
+
+def currency_exposure(positions: list[dict]) -> dict[str, float]:
+    """EUR value per underlying currency group, looking through to where the business earns.
+
+    The listing currency says little (a US ETF on Xetra trades in EUR but holds
+    dollars), so ETFs and non-European stocks use their region's currency mix.
+    European stocks use their listing currency, which tells EUR from CHF or GBP.
+    """
+    out: dict[str, float] = {}
+    for p in positions:
+        region = p.get("region") or "Other"
+        if region == "Europe" and p.get("sector") != "ETF":
+            mix = {_CCY_GROUP.get(p.get("currency", ""), "Other"): 1.0}
+        else:
+            mix = _REGION_CURRENCIES.get(region, {"Other": 1.0})
+        for ccy, w in mix.items():
+            out[ccy] = out.get(ccy, 0) + p["value_eur"] * w
+    return out
 
 
 def generate_charts(positions: list[dict], summary: dict,

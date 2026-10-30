@@ -374,3 +374,69 @@ def cumulative_flows(cashflows: list[dict]) -> list[dict]:
         income += c["income_eur"]
         out.append(dict(date=c["date"], invested=invested, income=income))
     return out
+
+
+def counterfactual_value(cashflows: list[dict], prices: pd.Series) -> pd.Series:
+    """Value over time had every net euro paid in bought `prices` (e.g. an index fund) instead.
+
+    Each booking buys (or, when negative, sells) units at the first close on or
+    after its date; income is left out, as the index price already reinvests it.
+    """
+    prices = prices.dropna()
+    if prices.empty or not cashflows:
+        return pd.Series(dtype=float)
+    units = pd.Series(0.0, index=prices.index)
+    for c in cashflows:
+        pos = min(prices.index.searchsorted(pd.Timestamp(c["date"])), len(prices) - 1)
+        units.iloc[pos] += c["invested_eur"] / prices.iloc[pos]
+    first = pd.Timestamp(cashflows[0]["date"])
+    held = units.cumsum() * prices
+    return held[held.index >= min(first, prices.index[-1])]
+
+
+def monthly_flows(cashflows: list[dict]) -> list[dict]:
+    """Net money invested and income received per calendar month."""
+    if not cashflows:
+        return []
+    frame = pd.DataFrame(cashflows)
+    frame["month"] = frame["date"].str[:7]
+    sums = frame.groupby("month")[["invested_eur", "income_eur"]].sum()
+    return [dict(month=m, invested=float(r.invested_eur), income=float(r.income_eur))
+            for m, r in sums.iterrows()]
+
+
+# ── Recommendation track record ─────────────────────────────────────────────
+
+# ADD should beat the benchmark afterwards; TRIM and EXIT should lag it. RESEARCH has no direction.
+_REC_DIRECTION = {"ADD": 1, "TRIM": -1, "EXIT": -1}
+
+
+def _close_on(prices: pd.Series, day: pd.Timestamp) -> float | None:
+    before = prices.dropna()
+    if before.empty:
+        return None
+    before = before[before.index <= day]
+    return float(before.iloc[-1]) if not before.empty else None
+
+
+def recommendation_record(recs: dict[str, dict], prices: pd.DataFrame, bench: pd.Series) -> list[dict]:
+    """Return of each recommended name since the recommendation, against the benchmark.
+
+    A hit is judged on the return relative to the benchmark (`excess`), not the
+    raw price, so a falling market doesn't make every TRIM look clever.
+    """
+    rows = []
+    for ticker, rec in recs.items():
+        day = pd.Timestamp(rec["date"])
+        series = prices[ticker].dropna() if ticker in prices.columns else pd.Series(dtype=float)
+        then, now = _close_on(series, day), (float(series.iloc[-1]) if not series.empty else None)
+        b_then, b_now = _close_on(bench, day), _close_on(bench, bench.index[-1])
+        ret = now / then - 1 if then and now else None
+        bench_ret = b_now / b_then - 1 if b_then and b_now else None
+        excess = ret - bench_ret if ret is not None and bench_ret is not None else None
+        direction = _REC_DIRECTION.get(rec.get("action", ""))
+        hit = None if direction is None or excess is None else (excess > 0) == (direction > 0)
+        rows.append(dict(ticker=ticker, action=rec.get("action", ""), report=rec.get("report"),
+                         date=rec["date"], ret=ret, bench_ret=bench_ret, excess=excess, hit=hit))
+    rows.sort(key=lambda r: (r["date"], r["ticker"]), reverse=True)
+    return rows

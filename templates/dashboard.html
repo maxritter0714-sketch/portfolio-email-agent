@@ -68,7 +68,9 @@
   <h2>Your actual record</h2>
   <div class="tiles" id="real-tiles"></div>
   <div class="note" id="real-note"></div>
+  <div class="controls" id="real-buttons"></div>
   <div class="chart" id="chart-real"></div>
+  <div class="chart small" id="chart-flows"></div>
 
   <h2>Today's portfolio — backtest</h2>
   <div class="note" id="backtest-note"></div>
@@ -103,11 +105,18 @@
     <div class="chart" id="chart-sectors"></div>
     <div class="chart" id="chart-regions"></div>
   </div>
+  <div class="note" id="currency-note"></div>
+  <div class="chart" id="chart-currencies" style="height: 300px"></div>
   <div class="chart tall" id="chart-risk-share"></div>
 
   <h2>Correlation (1 year, weekly)</h2>
   <div class="note">How similarly two positions move: 1 = in lockstep, 0 = unrelated. Large warm blocks are bets that look diversified but aren't.</div>
   <div class="chart" id="chart-corr" style="height: 820px"></div>
+
+  <h2>Recommendation track record</h2>
+  <div class="note" id="recs-note"></div>
+  <div class="tiles" id="recs-tiles"></div>
+  <div class="scroll"><table id="recs-table"></table></div>
 
   <footer id="footer"></footer>
 </main>
@@ -120,11 +129,13 @@ const BENCH = DATA.benchmarks;
 
 // ── Formatting ─────────────────────────────────────────────────────────────
 const isNum = v => typeof v === "number" && isFinite(v);
+// German number style throughout: decimal comma, dot for thousands, € after the amount.
+const dec = str => str.replace(".", ",");
 const pct = (v, d = 1, signed = true) =>
-  isNum(v) ? `${signed && v > 0 ? "+" : ""}${(v * 100).toFixed(d)}%` : "–";
-const num = (v, d = 2) => isNum(v) ? v.toFixed(d) : "–";
+  isNum(v) ? `${signed && v > 0 ? "+" : ""}${dec((v * 100).toFixed(d))}%` : "–";
+const num = (v, d = 2) => isNum(v) ? dec(v.toFixed(d)) : "–";
 const eur = (v, signed = false) => isNum(v)
-  ? `${signed && v > 0 ? "+" : ""}${v < 0 ? "−" : ""}€${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+  ? `${signed && v > 0 ? "+" : ""}${v < 0 ? "−" : ""}${Math.abs(v).toLocaleString("de-DE", { maximumFractionDigits: 0 })} €`
   : "–";
 const tone = v => isNum(v) ? (v > 0 ? "pos" : v < 0 ? "neg" : "") : "";
 const fmtDate = s => s ? new Date(s + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "–";
@@ -143,7 +154,7 @@ const scoreBetween = (v, bad, good) => isNum(v) ? 2 * (v - bad) / (good - bad) -
 
 function baseLayout(extra = {}) {
   return Object.assign({
-    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: T.panel,
+    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: T.panel, separators: ",.",
     font: { family: "Georgia, 'Times New Roman', serif", color: T.text, size: 12 },
     margin: { l: 56, r: 16, t: 16, b: 40 },
     xaxis: { gridcolor: "rgba(26,26,26,0.07)", zeroline: false },
@@ -188,23 +199,93 @@ el("real-tiles").innerHTML = [
   tile("Total gain", eur(R.gain, true), pct(R.gain_pct), tone(R.gain)),
   tile("<abbr title='Money-weighted annual return (XIRR): accounts for when each euro was paid in. This is the return your money actually earned.'>Your return p.a.</abbr>", pct(R.xirr), "money-weighted", tone(R.xirr)),
   tile("Dividends &amp; interest", eur(R.income), "received in total"),
+  counterTile(),
 ].join("");
+
+// Same deposits in the MSCI World ETF. It reinvests dividends, so your received income counts on your side.
+function counterTile() {
+  const W = R.counterfactual && R.counterfactual.world;
+  if (!W || !isNum(W.value)) return "";
+  const edge = R.value + (R.income || 0) - W.value;
+  return tile(`<abbr title='What your exact deposits and withdrawals would be worth today had each gone into an MSCI World ETF savings plan (EUNL, fees included) on the same day. Your order fees count against you. Positive = your picks beat it, in euros.'>vs ${BENCH.world}, same deposits</abbr>`,
+    eur(edge, true), `World would be ${eur(W.value)} · ${pct(W.xirr)} p.a.`, tone(edge));
+}
 el("real-note").textContent =
   "From your cash-flow export (Trade Republic account only) and the value snapshots in history.csv. " +
   "Value points before October 2026 were computed on stale holdings and are approximate.";
 
 (function realChart() {
-  if (!R.flows.length) { el("chart-real").style.display = "none"; return; }
-  const flows = R.flows.concat([{ date: DATA.generated.slice(0, 10), invested: R.flows.at(-1).invested }]);
-  Plotly.newPlot("chart-real", [
-    { x: flows.map(f => f.date), y: flows.map(f => f.invested), name: "Net paid in",
-      type: "scatter", mode: "lines", line: { shape: "hv", color: T.muted, width: 2 },
-      fill: "tozeroy", fillcolor: "rgba(138,123,94,0.12)",
-      hovertemplate: "€%{y:,.0f}<extra>Paid in</extra>" },
-    { x: R.snapshots.map(s => s.date), y: R.snapshots.map(s => s.value), name: "Portfolio value",
-      type: "scatter", mode: "lines+markers", line: { color: T.gold, width: 2.5 }, marker: { size: 7 },
-      hovertemplate: "€%{y:,.0f}<extra>Value</extra>" },
-  ], baseLayout({ yaxis: { tickprefix: "€", gridcolor: "rgba(26,26,26,0.07)" } }), CONFIG);
+  if (!R.flows.length) { el("chart-real").style.display = "none"; el("real-buttons").style.display = "none"; return; }
+  const flows = R.flows.concat([{ date: DATA.generated.slice(0, 10), invested: R.flows.at(-1).invested, income: R.flows.at(-1).income }]);
+  // Running totals as of any date (flows are sorted by date).
+  function totalsAt(dates) {
+    let i = -1;
+    return dates.map(d => {
+      while (i + 1 < flows.length && flows[i + 1].date <= d) i++;
+      return i < 0 ? { invested: 0, income: 0 } : flows[i];
+    });
+  }
+  const benches = [["world", T.navy, "dash"], ["sp500", T.sage, "dot"]]
+    .filter(([k]) => R.counterfactual[k] && R.counterfactual[k].dates);
+  const yaxis = { ticksuffix: " €", gridcolor: "rgba(26,26,26,0.07)" };
+
+  function valueView() {
+    return [
+      { x: flows.map(f => f.date), y: flows.map(f => f.invested), name: "Net paid in",
+        type: "scatter", mode: "lines", line: { shape: "hv", color: T.muted, width: 2 },
+        fill: "tozeroy", fillcolor: "rgba(138,123,94,0.12)",
+        hovertemplate: "%{y:,.0f} €<extra>Paid in</extra>" },
+      { x: R.snapshots.map(s => s.date), y: R.snapshots.map(s => s.value), name: "Portfolio value",
+        type: "scatter", mode: "lines+markers", line: { color: T.gold, width: 2.5 }, marker: { size: 7 },
+        hovertemplate: "%{y:,.0f} €<extra>Value</extra>" },
+      ...benches.map(([k, color, dash]) => ({
+        x: R.counterfactual[k].dates, y: R.counterfactual[k].values, name: `Same deposits in ${BENCH[k]}`,
+        type: "scatter", mode: "lines", line: { color, width: 1.5, dash },
+        hovertemplate: `%{y:,.0f} €<extra>${BENCH[k]}</extra>`,
+      })),
+    ];
+  }
+
+  // Value minus money paid in so far. Your side adds dividends received, since the ETFs reinvest theirs.
+  function gainView() {
+    const snapTotals = totalsAt(R.snapshots.map(s => s.date));
+    return [
+      { x: R.snapshots.map(s => s.date), y: R.snapshots.map((s, i) => s.value + snapTotals[i].income - snapTotals[i].invested),
+        name: "Your gain (incl. dividends)", type: "scatter", mode: "lines+markers",
+        line: { color: T.gold, width: 2.5 }, marker: { size: 7 },
+        hovertemplate: "%{y:,.0f} €<extra>Your gain</extra>" },
+      ...benches.map(([k, color, dash]) => {
+        const C = R.counterfactual[k], totals = totalsAt(C.dates);
+        return {
+          x: C.dates, y: C.values.map((v, i) => v - totals[i].invested), name: `Gain with ${BENCH[k]}`,
+          type: "scatter", mode: "lines", line: { color, width: 1.5, dash },
+          hovertemplate: `%{y:,.0f} €<extra>${BENCH[k]}</extra>`,
+        };
+      }),
+    ];
+  }
+
+  buttons("real-buttons", [["value", "Value"], ["gain", "Gain"]], "value", view =>
+    Plotly.react("chart-real", view === "gain" ? gainView() : valueView(),
+      baseLayout({ yaxis: view === "gain" ? { ...yaxis, zeroline: true, zerolinecolor: "rgba(26,26,26,0.35)" } : yaxis }),
+      CONFIG));
+})();
+
+(function flowChart() {
+  const M = R.monthly || [];
+  if (!M.length) { el("chart-flows").style.display = "none"; return; }
+  const x = M.map(m => m.month + "-01");
+  Plotly.newPlot("chart-flows", [
+    { type: "bar", x, y: M.map(m => m.invested), name: "Net paid in",
+      marker: { color: M.map(m => m.invested < 0 ? T.burgundy : T.muted) },
+      hovertemplate: "%{x|%b %Y}: %{y:,.0f} €<extra>Paid in</extra>" },
+    { type: "bar", x, y: M.map(m => m.income), name: "Dividends & interest", marker: { color: T.gold },
+      hovertemplate: "%{x|%b %Y}: %{y:,.0f} €<extra>Income</extra>" },
+  ], baseLayout({
+    barmode: "overlay", title: { text: "Per month", font: { size: 13 }, x: 0 },
+    yaxis: { ticksuffix: " €", gridcolor: "rgba(26,26,26,0.07)" }, margin: { l: 56, r: 16, t: 36, b: 30 },
+    legend: { orientation: "h", x: 0, y: 1.12 }, hovermode: "x unified",
+  }), CONFIG);
 })();
 
 // ── Backtest: index, range strip, drawdown ─────────────────────────────────
@@ -306,13 +387,13 @@ buttons("range-buttons",
   const M = DATA.monthly;
   const cols = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Year"];
   const z = M.grid.map((row, i) => row.concat([M.totals[i]]));
-  const text = z.map(row => row.map(v => isNum(v) ? `${v > 0 ? "+" : ""}${(v * 100).toFixed(1)}` : ""));
+  const text = z.map(row => row.map(v => isNum(v) ? `${v > 0 ? "+" : ""}${dec((v * 100).toFixed(1))}` : ""));
   const lim = Math.max(...M.grid.flat().filter(isNum).map(Math.abs));
   Plotly.newPlot("chart-monthly", [{
     type: "heatmap", x: cols, y: M.years.map(String), z, text, texttemplate: "%{text}",
     zmin: -lim, zmax: lim, zmid: 0, showscale: false, xgap: 2, ygap: 2,
     colorscale: [[0, T.burgundy], [0.5, "#f6f3ea"], [1, T.sage]],
-    hovertemplate: "%{x} %{y}: %{z:+.1%}<extra></extra>",
+    hovertemplate: "%{x} %{y}: %{z:.1%}<extra></extra>",
   }], baseLayout({
     yaxis: { autorange: "reversed", type: "category" }, xaxis: { side: "top" },
     margin: { l: 56, r: 16, t: 30, b: 10 }, hovermode: "closest",
@@ -422,7 +503,7 @@ function drawContrib() {
     type: "bar", orientation: "h", y: pick.map(p => p.ticker), x: pick.map(p => p.contrib[posPeriod]),
     marker: { color: pick.map(p => p.contrib[posPeriod] >= 0 ? T.sage : T.burgundy) },
     customdata: pick.map(p => [p.name, p.returns[posPeriod]]),
-    hovertemplate: "%{customdata[0]}<br>Contribution %{x:+.2%}<br>Return %{customdata[1]:+.1%}<extra></extra>",
+    hovertemplate: "%{customdata[0]}<br>Contribution %{x:.2%}<br>Return %{customdata[1]:.1%}<extra></extra>",
   }], baseLayout({
     xaxis: { tickformat: "+.1%", gridcolor: "rgba(26,26,26,0.07)", zeroline: true, zerolinecolor: T.text },
     yaxis: { type: "category", automargin: true },
@@ -438,14 +519,46 @@ buttons("position-buttons", ["1M", "3M", "YTD", "1Y"].map(k => [k, `Return & con
 });
 
 // ── Structure ──────────────────────────────────────────────────────────────
+(function recommendations() {
+  const recs = DATA.recommendations || [];
+  el("recs-note").textContent =
+    "Each name the email recommended, measured from the close on the day of the recommendation against the MSCI World over the same days. " +
+    "A hit means ADD beat the World, TRIM or EXIT lagged it. Only the latest recommendation per name is stored (conviction.json, kept about six months), " +
+    "so this is a short, recent sample, not a full history.";
+  if (!recs.length) { el("recs-table").innerHTML = "<tr><td>No recommendations stored yet.</td></tr>"; return; }
+  const judged = recs.filter(r => r.hit !== null);
+  const hits = judged.filter(r => r.hit).length;
+  const DIRECTED = { ADD: 1, TRIM: -1, EXIT: -1 };
+  const edges = recs.filter(r => isNum(r.excess) && r.action in DIRECTED).map(r => r.excess * DIRECTED[r.action]);
+  const avgEdge = edges.length ? edges.reduce((a, b) => a + b, 0) / edges.length : null;
+  el("recs-tiles").innerHTML = [
+    tile("Hit rate", judged.length ? `${hits} / ${judged.length}` : "–",
+      judged.length ? pct(hits / judged.length, 0, false) : "no ADD/TRIM/EXIT yet",
+      judged.length ? tone(hits / judged.length - 0.5) : ""),
+    tile("<abbr title='Average return relative to the MSCI World in the direction of the advice: for TRIM and EXIT, a name lagging the World counts as a gain.'>Avg edge vs World</abbr>",
+      pct(avgEdge), "in the advised direction", tone(avgEdge)),
+  ].join("");
+  const head = "<tr><th>Date</th><th>Issue</th><th>Ticker</th><th>Action</th><th>Since</th><th>MSCI World</th><th>Relative</th><th>Hit</th></tr>";
+  el("recs-table").innerHTML = head + recs.map(r =>
+    `<tr><td>${fmtDate(r.date)}</td><td>${r.report ? "№ " + r.report : ""}</td><td>${r.ticker}</td><td>${r.action}</td>` +
+    `<td>${pct(r.ret)}</td><td>${pct(r.bench_ret)}</td><td>${pct(r.excess)}</td>` +
+    `<td ${r.hit === null ? "" : shade(r.hit ? 0.8 : -0.8)}>${r.hit === null ? "–" : r.hit ? "yes" : "no"}</td></tr>`).join("");
+})();
+
 (function structure() {
   const X = DATA.structure;
+  const C = DATA.costs;
   el("structure-tiles").innerHTML = [
     tile("Positions", X.count, `act like <b>${num(X.effective_n, 0)}</b> equal ones`),
     tile("<abbr title='Herfindahl index: sum of squared weights. Lower = more spread out.'>HHI</abbr>", num(X.hhi, 3)),
     tile("Top 5 / top 10", `${pct(X.top5, 0, false)} / ${pct(X.top10, 0, false)}`, "of portfolio value"),
     tile("Volatility (1Y)", pct(X.volatility, 1, false), "with today's weights"),
     tile("<abbr title='Weighted average of the positions&#39; own volatilities divided by the portfolio volatility. 1.0 = no diversification benefit.'>Diversification ratio</abbr>", num(X.diversification_ratio), "higher = more offsetting"),
+    tile("<abbr title='Ongoing charges (TER, from Yahoo) of your ETFs, weighted by value. Single stocks cost nothing to hold.'>Fund costs</abbr>",
+      `${eur(C.ter_cost)} <small>/ yr</small>`,
+      `${pct(C.ter_portfolio, 2, false)} of portfolio · ${pct(C.ter_etfs, 2, false)} on ETFs` + (C.missing_ter.length ? ` · no TER: ${C.missing_ter.join(", ")}` : "")),
+    tile("<abbr title='Dividends paid over the last 12 months by the shares you hold today. Accumulating ETFs reinvest internally and show none.'>Dividends, trailing 12M</abbr>",
+      `${eur(C.dividends)} <small>/ yr</small>`, `${pct(C.dividend_yield, 2, false)} yield`),
   ].join("");
 
   const bars = (id, items, title) => Plotly.newPlot(id, [{
@@ -457,6 +570,11 @@ buttons("position-buttons", ["1M", "3M", "YTD", "1Y"].map(k => [k, `Return & con
   }), CONFIG);
   bars("chart-sectors", X.sectors.slice(0, 12), "Sectors (ETFs spread across their holdings)");
   bars("chart-regions", X.regions, "Regions");
+  bars("chart-currencies", X.currencies, "Currencies behind the holdings");
+  const eurShare = (X.currencies.find(c => c.name === "EUR") || { weight: 0 }).weight;
+  el("currency-note").innerHTML = `<b>${pct(1 - eurShare, 0, false)}</b> of the portfolio moves with currencies other than the euro. ` +
+    "Looked through to where the businesses earn, not the trading currency: a US ETF bought in euros on Xetra still holds dollar assets. " +
+    "ETF mixes are approximate index weights. A weaker dollar lowers your euro value even when the stocks don't move.";
 
   const top = [...P].filter(p => isNum(p.risk_share)).sort((a, b) => b.risk_share - a.risk_share).slice(0, 20).reverse();
   Plotly.newPlot("chart-risk-share", [
@@ -485,8 +603,11 @@ buttons("position-buttons", ["1M", "3M", "YTD", "1Y"].map(k => [k, `Return & con
 
 el("footer").innerHTML = `
   <p><b>Backtest method.</b> Daily dividend-adjusted closes, converted to EUR with daily FX. Today's share counts are held
-  unchanged; a position joins the day after its first listing. Benchmarks: ${BENCH.sp500} (total return) and
-  ${BENCH.world} (iShares ETF, net of fees), both in EUR.</p>
+  unchanged; a position joins the day after its first listing. Benchmarks are the iShares Core ETFs on Xetra,
+  ${BENCH.sp500} and ${BENCH.world}: in EUR, accumulating, net of fund fees and withholding tax, like a plain ETF savings plan.</p>
+  <p><b>Costs.</b> Your actual record is net of everything that left your account, including about €1 per order.
+  The same-deposits comparison puts every euro, fee included, into the ETF, i.e. a free savings plan. German taxes on
+  sales and the yearly Vorabpauschale are in neither side.</p>
   <p><b>Weekly co-movement.</b> Beta, correlation, tracking error and risk shares use weekly returns. Xetra closes hours before
   New York, so on daily data US moves reach EUR listings a day late and correlations look far too low.</p>
   <p><b>Differences from the email.</b> The email's risk figures use constant weights, daily returns over one year and the

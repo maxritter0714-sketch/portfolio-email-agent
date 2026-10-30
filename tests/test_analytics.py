@@ -11,20 +11,23 @@ from analytics import (
     capture_ratios,
     concentration,
     contributions,
+    counterfactual_value,
     cumulative_flows,
     drawdown_stats,
     index_from_returns,
+    monthly_flows,
     monthly_returns,
     period_return,
     period_start,
     portfolio_xirr,
+    recommendation_record,
     risk_contributions,
     risk_stats,
     to_weekly,
     xirr,
 )
 from dashboard import _json_ready, render_html
-from market import region_exposure, sector_exposure
+from market import currency_exposure, region_exposure, sector_exposure
 
 
 def _days(n, start="2024-01-01"):
@@ -228,3 +231,63 @@ def test_to_eur_close_long_period_uses_its_own_cache(monkeypatch):
     close = pd.Series([10.0, 10.0], index=idx)
     assert market._to_eur_close(close, "USD", {"USD": 0.9}).iloc[0] == pytest.approx(5.0)
     assert market._to_eur_close(close, "USD", {"USD": 0.9}, fx_period="7y").iloc[0] == pytest.approx(8.0)
+
+
+# ── Additions: counterfactual, flows, costs, currencies, track record ─────────
+
+def test_counterfactual_buys_on_next_close_and_sells():
+    idx = pd.to_datetime(["2024-01-05", "2024-01-08", "2024-01-09"])
+    prices = pd.Series([10.0, 20.0, 40.0], index=idx)
+    flows = [
+        dict(date="2024-01-06", invested_eur=100.0, income_eur=0.0),  # Saturday → buys 5 units on Monday at 20
+        dict(date="2024-01-09", invested_eur=-80.0, income_eur=0.0),  # sells 2 units at 40
+    ]
+    value = counterfactual_value(flows, prices)
+    assert value.index[0] == pd.Timestamp("2024-01-08")
+    assert value.tolist() == pytest.approx([100.0, 120.0])
+
+
+def test_monthly_flows_groups_by_month():
+    flows = [
+        dict(date="2024-01-02", invested_eur=100.0, income_eur=0.0),
+        dict(date="2024-01-20", invested_eur=50.0, income_eur=1.5),
+        dict(date="2024-03-01", invested_eur=-20.0, income_eur=0.0),
+    ]
+    assert monthly_flows(flows) == [
+        dict(month="2024-01", invested=150.0, income=1.5),
+        dict(month="2024-03", invested=-20.0, income=0.0),
+    ]
+
+
+def test_currency_exposure_looks_through_etfs_and_uses_listing_for_european_stocks():
+    positions = [
+        dict(value_eur=100.0, sector="ETF", region="North America", currency="EUR"),
+        dict(value_eur=50.0, sector="Healthcare", region="Europe", currency="CHF"),
+        dict(value_eur=50.0, sector="ETF", region="Europe", currency="EUR"),
+    ]
+    out = currency_exposure(positions)
+    assert out["USD"] == pytest.approx(100.0)
+    assert out["EUR"] == pytest.approx(27.5)
+    assert out["GBP / CHF / Nordic"] == pytest.approx(72.5)
+
+
+def test_expense_ratio_converts_percent_and_ignores_stocks():
+    assert market._expense_ratio({"quoteType": "ETF", "netExpenseRatio": 0.07}) == pytest.approx(0.0007)
+    assert market._expense_ratio({"quoteType": "EQUITY", "netExpenseRatio": 0.5}) is None
+    assert market._expense_ratio({"quoteType": "ETF"}) is None
+
+
+def test_recommendation_record_judges_against_benchmark():
+    idx = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+    prices = pd.DataFrame({"A": [10.0, 10.0, 9.0], "B": [10.0, 10.0, 11.0]}, index=idx)
+    bench = pd.Series([100.0, 100.0, 80.0], index=idx)
+    recs = {
+        "A": dict(action="TRIM", report=3, date="2024-01-03"),  # −10 % while the market fell 20 %: beat it, so a miss
+        "B": dict(action="ADD", report=3, date="2024-01-03"),
+        "C": dict(action="RESEARCH", report=3, date="2024-01-03"),
+    }
+    rows = {r["ticker"]: r for r in recommendation_record(recs, prices, bench)}
+    assert rows["A"]["excess"] == pytest.approx(0.10)
+    assert rows["A"]["hit"] is False
+    assert rows["B"]["hit"] is True
+    assert rows["C"]["ret"] is None and rows["C"]["hit"] is None

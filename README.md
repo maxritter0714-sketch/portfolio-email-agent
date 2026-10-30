@@ -267,9 +267,10 @@ python dashboard.py --open
 
 This writes `output/dashboard.html`, a single file you open locally (it loads Plotly from a CDN, so it needs an internet connection to display). It fetches prices only — no Claude, no news, no email — and takes about half a minute. Sections:
 
-- **Your actual record** — net paid in vs value, total gain and your money-weighted return p.a. (XIRR), from `cashflows.csv` and `history.csv` (section 9).
-- **Backtest of today's portfolio** — today's share counts held unchanged over up to 7 years against the S&P 500 and MSCI World (total return, in EUR): range buttons, drawdown, returns by period, monthly heatmap, risk table (Sharpe, Sortino, beta, tracking error, capture ratios, VaR…) and rolling metrics. This shows how your current holdings behave, not your actual past performance.
+- **Your actual record** — net paid in vs value, total gain and your money-weighted return p.a. (XIRR), from `cashflows.csv` and `history.csv` (section 9); what the same deposits would be worth in the MSCI World or S&P 500; money paid in and income per month.
+- **Backtest of today's portfolio** — today's share counts held unchanged over up to 7 years against the S&P 500 and MSCI World (as the iShares Core ETFs SXR8 and EUNL on Xetra: in EUR, net of fund fees): range buttons, drawdown, returns by period, monthly heatmap, risk table (Sharpe, Sortino, beta, tracking error, capture ratios, VaR…) and rolling metrics. This shows how your current holdings behave, not your actual past performance.
 - **Positions** — sortable table with return and contribution per period, volatility, beta, risk share and momentum.
-- **Structure** — concentration, diversification ratio, sectors, regions, weight vs risk share and a correlation heatmap.
+- **Structure** — concentration, diversification ratio, fund costs (TER) and trailing dividends, sectors, regions, currencies looked through to the underlying assets, weight vs risk share and a correlation heatmap.
+- **Recommendation track record** — each recommendation in `conviction.json` against the MSCI World since the day it was made.
 
 The file contains your holdings and euro amounts. Keep it local, or host it only behind a login.

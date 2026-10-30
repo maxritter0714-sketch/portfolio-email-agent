@@ -28,9 +28,11 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 import analytics as an
+from claude_report import load_conviction
 from market import (
     _read_history,
     _to_eur_close,
+    currency_exposure,
     fetch_portfolio_data,
     get_fx_rates,
     holdings_as_of,
@@ -50,10 +52,11 @@ from theme import (
 log = logging.getLogger(__name__)
 
 HISTORY_PERIOD = "7y"
-# Total-return benchmarks, so they compare fairly with dividend-adjusted holdings.
+# Benchmarks are the accumulating Xetra ETFs a German saver would actually buy: in EUR,
+# net of fund fees and withholding tax, so they compare fairly with the real portfolio.
 BENCHMARKS = {
-    "sp500": ("^SP500TR", "S&P 500 TR"),
-    "world": ("URTH", "MSCI World"),
+    "sp500": ("SXR8.DE", "S&P 500 (SXR8)", "EUR"),
+    "world": ("EUNL.DE", "MSCI World (EUNL)", "EUR"),
 }
 # The backtest starts once this share of today's value was already listed.
 MIN_COVERAGE = 0.5
@@ -85,14 +88,31 @@ def fetch_eur_prices(currencies: dict[str, str], fx_rates: dict[str, float]) -> 
     return pd.DataFrame(cols).sort_index()
 
 
+def _listing_currency(ticker: str) -> str:
+    try:
+        return yf.Ticker(ticker).fast_info.currency or "USD"
+    except Exception:
+        return "USD"
+
+
 # ── Payload ──────────────────────────────────────────────────────────────────
 
 def _series(s: pd.Series) -> dict:
     return dict(dates=[d.date().isoformat() for d in s.index], values=s.tolist())
 
 
+def _counterfactual(cashflows: list[dict], prices: pd.Series, today: date) -> dict:
+    """The same deposits put into one benchmark fund instead."""
+    value = an.counterfactual_value(cashflows, prices)
+    if value.empty:
+        return {}
+    end_value = float(value.iloc[-1])
+    flows = [(date.fromisoformat(c["date"]), -c["invested_eur"]) for c in cashflows]
+    return dict(**_series(value), value=end_value, xirr=an.xirr(flows + [(today, end_value)]))
+
+
 def _real_record(positions_value: float, cashflows: list[dict], history: list[dict],
-                 today: date) -> dict:
+                 bench_prices: pd.DataFrame, today: date) -> dict:
     """Actual money paid in vs value, from cashflows.csv and history.csv."""
     snapshots = [
         dict(date=r["date"][:10], value=float(r["total_value_eur"]))
@@ -112,6 +132,24 @@ def _real_record(positions_value: float, cashflows: list[dict], history: list[di
         since=lifetime["since"].isoformat() if lifetime else None,
         xirr=an.portfolio_xirr(cashflows, positions_value, today) if cashflows else None,
         flows_as_of=cashflows[-1]["date"] if cashflows else None,
+        monthly=an.monthly_flows(cashflows),
+        counterfactual={k: _counterfactual(cashflows, bench_prices[k], today) for k in bench_prices.columns},
+    )
+
+
+def _costs(positions: list[dict], total_value: float) -> dict:
+    """Yearly fund charges and trailing dividends. Stocks carry no ongoing charge."""
+    etfs = [p for p in positions if p.get("sector") == "ETF"]
+    charge = sum(p["value_eur"] * (p.get("expense_ratio") or 0) for p in etfs)
+    dividends = sum(p.get("dividend_ttm_eur") or 0 for p in positions)
+    return dict(
+        ter_cost=charge,
+        ter_portfolio=charge / total_value if total_value else None,
+        ter_etfs=charge / sum(p["value_eur"] for p in etfs) if etfs else None,
+        etf_share=sum(p["value_eur"] for p in etfs) / total_value if total_value else None,
+        missing_ter=[p["ticker"] for p in etfs if p.get("expense_ratio") is None],
+        dividends=dividends,
+        dividend_yield=dividends / total_value if total_value else None,
     )
 
 
@@ -123,7 +161,10 @@ def build_payload(
     history: list[dict],
     risk_free: float,
     today: date,
+    recs: dict[str, dict] | None = None,
+    rec_prices: pd.DataFrame | None = None,
 ) -> dict:
+    """`rec_prices` adds closes for recommended names no longer held (track record only)."""
     total_value = sum(p["value_eur"] for p in positions)
     shares = pd.Series({p["ticker"]: p["shares"] for p in positions})
     weights = pd.Series({p["ticker"]: p["value_eur"] / total_value for p in positions})
@@ -186,6 +227,8 @@ def build_payload(
             risk_share=float(risk_share[t]) if t in risk_share.index else None,
             momentum_q=momentum[t]["quartile"] if t in momentum else None,
             listed=prices[t].first_valid_index().date().isoformat() if t in prices.columns else None,
+            ter=p.get("expense_ratio"),
+            dividends=p.get("dividend_ttm_eur"),
         ))
 
     ordered = [r["ticker"] for r in rows if r["ticker"] in returns_1y.columns]
@@ -199,8 +242,8 @@ def build_payload(
         generated=dt.now().isoformat(timespec="minutes"),
         holdings_as_of=(d.isoformat() if (d := holdings_as_of()) else None),
         risk_free=risk_free,
-        benchmarks={k: label for k, (_, label) in BENCHMARKS.items()},
-        real=_real_record(total_value, cashflows, history, today),
+        benchmarks={k: label for k, (_, label, _) in BENCHMARKS.items()},
+        real=_real_record(total_value, cashflows, history, bench_prices, today),
         series=dict(
             dates=[d.date().isoformat() for d in port_ret.index],
             portfolio=indices["portfolio"].tolist(),
@@ -221,7 +264,12 @@ def build_payload(
             diversification_ratio=div_ratio,
             sectors=shares_of(sector_exposure(positions)),
             regions=shares_of(region_exposure(positions)),
+            currencies=shares_of(currency_exposure(positions)),
         ),
+        costs=_costs(positions, total_value),
+        recommendations=an.recommendation_record(
+            recs or {}, prices if rec_prices is None else prices.join(rec_prices, how="outer"),
+            bench_prices["world"]),
         correlation=dict(tickers=ordered, matrix=corr.round(3).to_numpy().tolist()),
         theme=dict(
             bg=BG_CREAM, panel=BG_CHART, text=TEXT_PRIMARY, muted=TEXT_SECONDARY,
@@ -272,8 +320,13 @@ def main() -> None:
 
     log.info("Fetching %s of price history", HISTORY_PERIOD)
     prices = fetch_eur_prices({p["ticker"]: p.get("currency", "USD") for p in positions}, fx_rates)
-    bench = fetch_eur_prices({sym: "USD" for sym, _ in BENCHMARKS.values()}, fx_rates)
-    bench = bench.rename(columns={sym: key for key, (sym, _) in BENCHMARKS.items()})
+    bench = fetch_eur_prices({sym: ccy for sym, _, ccy in BENCHMARKS.values()}, fx_rates)
+    bench = bench.rename(columns={sym: key for key, (sym, _, _) in BENCHMARKS.items()})
+
+    # Recommended names no longer held still need prices for the track record.
+    recs = load_conviction()
+    gone = [t for t in recs if t not in prices.columns]
+    rec_prices = fetch_eur_prices({t: _listing_currency(t) for t in gone}, fx_rates) if gone else None
 
     payload = build_payload(
         positions=[p for p in positions if p["ticker"] in prices.columns],
@@ -283,6 +336,8 @@ def main() -> None:
         history=_read_history(),
         risk_free=risk_free_rate(),
         today=date.today(),
+        recs=recs,
+        rec_prices=rec_prices,
     )
     OUTPUT_DIR.mkdir(exist_ok=True)
     OUTPUT_PATH.write_text(render_html(payload, TEMPLATE_PATH.read_text(encoding="utf-8")),
