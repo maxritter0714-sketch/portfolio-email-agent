@@ -271,6 +271,7 @@ This writes `output/dashboard.html`, a single file you open locally (it loads Pl
 - **Backtest of today's portfolio** — today's share counts held unchanged over up to 7 years against the S&P 500 and MSCI World (as the iShares Core ETFs SXR8 and EUNL on Xetra: in EUR, net of fund fees): range buttons, drawdown, returns by period, monthly heatmap, risk table (Sharpe, Sortino, beta, tracking error, capture ratios, VaR…) and rolling metrics. This shows how your current holdings behave, not your actual past performance.
 - **Positions** — sortable table with return and contribution per period, volatility, beta, risk share and momentum.
 - **Structure** — concentration, diversification ratio, fund costs (TER) and trailing dividends, sectors, regions, currencies looked through to the underlying assets, weight vs risk share and a correlation heatmap.
+- **Simulations** — stress tests (today's holdings through Covid 2020, the 2022 rate shock, the 2024 yen carry unwind and the 2025 tariff shock), a what-if tool to re-weight positions, and a Monte Carlo projection with sliders for saving, years, return and volatility.
 - **Recommendation track record** — each recommendation in `conviction.json` against the MSCI World since the day it was made.
 
 The file contains your holdings and euro amounts. Keep it local, or host it only behind a login.

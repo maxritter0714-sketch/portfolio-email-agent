@@ -62,6 +62,15 @@ BENCHMARKS = {
 MIN_COVERAGE = 0.5
 POSITION_PERIODS = ("1M", "3M", "YTD", "1Y")
 RISK_WINDOWS = ("1Y", "3Y", "5Y")
+# Past sell-offs, peak to trough of the S&P 500 (US dates).
+STRESS_SCENARIOS = (
+    ("covid", "Covid crash", "2020-02-19", "2020-03-23"),
+    ("rates", "Rate shock", "2022-01-03", "2022-10-12"),
+    ("carry", "Yen carry unwind", "2024-07-16", "2024-08-05"),
+    ("tariffs", "Tariff shock", "2025-02-19", "2025-04-08"),
+)
+# Weekly position returns behind the what-if tool, in the browser.
+WHATIF_PERIOD = "3Y"
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "dashboard.html"
 OUTPUT_PATH = OUTPUT_DIR / "dashboard.html"
 
@@ -150,6 +159,44 @@ def _costs(positions: list[dict], total_value: float) -> dict:
         missing_ter=[p["ticker"] for p in etfs if p.get("expense_ratio") is None],
         dividends=dividends,
         dividend_yield=dividends / total_value if total_value else None,
+    )
+
+
+def _stress(prices: pd.DataFrame, bench_prices: pd.DataFrame, weights: pd.Series,
+            total_value: float) -> list[dict]:
+    """Today's portfolio through each past sell-off; unlisted names take the MSCI World's return."""
+    out = []
+    for key, label, start, end in STRESS_SCENARIOS:
+        t0, t1 = pd.Timestamp(start), pd.Timestamp(end)
+        bench = an.window_returns(bench_prices, t0, t1)
+        if bench.isna().any():
+            continue
+        ret, detail = an.stress_test(prices, weights, t0, t1, fill=float(bench["world"]))
+        worst = detail.sort_values("contrib").head(5)
+        out.append(dict(
+            key=key, label=label, start=start, end=end,
+            portfolio=ret, loss_eur=ret * total_value,
+            sp500=float(bench["sp500"]), world=float(bench["world"]),
+            filled_share=float(weights[detail["filled"]].sum()),
+            filled=[t for t in detail.index if detail.at[t, "filled"]],
+            worst=[dict(ticker=t, ret=float(r.ret), contrib=float(r.contrib), filled=bool(r.filled))
+                   for t, r in worst.iterrows()],
+        ))
+    return out
+
+
+def _whatif(prices: pd.DataFrame, bench_prices: pd.DataFrame, end: pd.Timestamp) -> dict:
+    """Weekly returns per position and for the MSCI World, for re-weighting in the browser."""
+    since = an.period_start(end, WHATIF_PERIOD)
+    daily = pd.DataFrame({t: prices[t].dropna().pct_change() for t in prices.columns})
+    weekly = an.to_weekly(daily[daily.index > since])
+    world = an.to_weekly(bench_prices["world"].dropna().pct_change().loc[lambda s: s.index > since])
+    weekly = weekly.reindex(weekly.index.intersection(world.index))
+    return dict(
+        dates=[d.date().isoformat() for d in weekly.index],
+        tickers=list(weekly.columns),
+        returns=weekly.round(5).to_numpy().tolist(),
+        world=world.reindex(weekly.index).round(5).tolist(),
     )
 
 
@@ -271,6 +318,13 @@ def build_payload(
             recs or {}, prices if rec_prices is None else prices.join(rec_prices, how="outer"),
             bench_prices["world"]),
         correlation=dict(tickers=ordered, matrix=corr.round(3).to_numpy().tolist()),
+        stress=_stress(prices, bench_prices, weights, total_value),
+        whatif=_whatif(prices, bench_prices, end),
+        simulation=dict(
+            value=total_value,
+            volatility=(risk.get("3Y") or risk["Max"]).get("volatility"),
+            savings=an.average_monthly_savings(cashflows, today),
+        ),
         theme=dict(
             bg=BG_CREAM, panel=BG_CHART, text=TEXT_PRIMARY, muted=TEXT_SECONDARY,
             gold=GOLD, dark_gold=DARK_GOLD, navy=NAVY, sage=SAGE, burgundy=BURGUNDY,

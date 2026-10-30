@@ -440,3 +440,42 @@ def recommendation_record(recs: dict[str, dict], prices: pd.DataFrame, bench: pd
                          date=rec["date"], ret=ret, bench_ret=bench_ret, excess=excess, hit=hit))
     rows.sort(key=lambda r: (r["date"], r["ticker"]), reverse=True)
     return rows
+
+
+# ── Simulations ─────────────────────────────────────────────────────────────
+
+def window_returns(prices: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
+    """Return of each column from the last close on or before `start` to the last on or before `end`.
+
+    NaN for names that weren't listed yet at `start`.
+    """
+    filled = prices.ffill()
+    before = filled[filled.index <= start]
+    until = filled[filled.index <= end]
+    if before.empty or until.empty:
+        return pd.Series(np.nan, index=prices.columns)
+    return until.iloc[-1] / before.iloc[-1] - 1
+
+
+def stress_test(prices: pd.DataFrame, weights: pd.Series, start: pd.Timestamp, end: pd.Timestamp,
+                fill: float) -> tuple[float, pd.DataFrame]:
+    """Today's weights through a past episode, held without trading.
+
+    Names not yet listed at `start` get `fill` (the benchmark's return) and are flagged.
+    Returns the portfolio return and a frame of ret / contrib / filled per name.
+    """
+    ret = window_returns(prices.reindex(columns=weights.index), start, end)
+    filled = ret.isna()
+    ret = ret.fillna(fill)
+    contrib = weights * ret
+    return float(contrib.sum()), pd.DataFrame({"ret": ret, "contrib": contrib, "filled": filled})
+
+
+def average_monthly_savings(cashflows: list[dict], today: date, months: int = 12) -> float | None:
+    """Mean net money paid in per month over the last `months` full months (empty months count as 0)."""
+    if not cashflows:
+        return None
+    this_month = pd.Period(today, "M")
+    window = {str(this_month - i) for i in range(1, months + 1)}
+    total = sum(m["invested"] for m in monthly_flows(cashflows) if m["month"] in window)
+    return total / months

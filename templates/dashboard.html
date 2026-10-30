@@ -51,9 +51,22 @@
   th.sorted.asc::after { content: " ▴"; }
   td.name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
   td.name small { color: var(--muted); }
+  td.drags { white-space: normal; min-width: 220px; }
   abbr { text-decoration: underline dotted var(--muted); cursor: help; }
   .strip { display: flex; flex-wrap: wrap; gap: 22px; font-size: 13px; margin: 4px 0 6px; }
   .strip b { font-weight: normal; font-size: 17px; }
+  .whatif-list { max-height: 460px; overflow-y: auto; border-top: 1px solid var(--rule); }
+  .whatif-list td { padding: 4px 8px; }
+  select, input[type=number] {
+    font: inherit; font-size: 13px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--rule); padding: 2px 4px;
+  }
+  input[type=number] { width: 110px; }
+  input[type=range] { width: 100%; accent-color: var(--gold); }
+  .sim-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px 24px; margin: 8px 0 18px; }
+  .sim-inputs label { display: block; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .sim-inputs output { font-size: 15px; }
+  .changed td { background: rgba(201,169,97,0.12); }
   footer { margin-top: 56px; border-top: 1px solid var(--rule); padding-top: 12px; color: var(--muted); font-size: 12px; }
   footer p { margin: 6px 0; max-width: 900px; }
 </style>
@@ -112,6 +125,39 @@
   <h2>Correlation (1 year, weekly)</h2>
   <div class="note">How similarly two positions move: 1 = in lockstep, 0 = unrelated. Large warm blocks are bets that look diversified but aren't.</div>
   <div class="chart" id="chart-corr" style="height: 820px"></div>
+
+  <h2>Stress tests</h2>
+  <div class="note">Today's holdings and weights run through past sell-offs, peak to trough of the S&amp;P 500, without trading.
+    Names that weren't listed yet take the MSCI World's return and are counted under "filled" (marked * among the drags; hover the share for the names).
+    Shaded by the gap to the MSCI World.</div>
+  <div class="scroll"><table id="stress-table"></table></div>
+
+  <h2>What if</h2>
+  <div class="note">Change the weight a position has today and see how the portfolio would have done. Held without trading,
+    like the backtest above but on weekly returns; names join when they were listed. "New weight" is the share of today's value.</div>
+  <div class="controls" id="whatif-windows"></div>
+  <div class="controls" id="whatif-presets"></div>
+  <div class="grid2">
+    <div class="whatif-list"><table id="whatif-list"></table></div>
+    <div>
+      <table id="whatif-stats"></table>
+      <div class="chart small" id="chart-whatif"></div>
+    </div>
+  </div>
+
+  <h2>Monte Carlo</h2>
+  <div class="note" id="mc-note"></div>
+  <div class="sim-inputs">
+    <div><label for="mc-savings">Saving per month</label><input type="number" id="mc-savings" step="50" min="0"> €</div>
+    <div><label for="mc-years">Years: <output id="mc-years-out"></output></label><input type="range" id="mc-years" min="1" max="40" step="1"></div>
+    <div><label for="mc-return">Expected return p.a.: <output id="mc-return-out"></output></label><input type="range" id="mc-return" min="0" max="12" step="0.5"></div>
+    <div><label for="mc-vol">Volatility p.a.: <output id="mc-vol-out"></output></label><input type="range" id="mc-vol" min="5" max="40" step="1"></div>
+    <div><label for="mc-target">Target</label><input type="number" id="mc-target" step="10000" min="0"> €</div>
+    <div><label for="mc-real">Today's money</label><label style="text-transform:none;letter-spacing:0;font-size:13px;color:var(--text)">
+      <input type="checkbox" id="mc-real"> deduct 2% inflation a year</label></div>
+  </div>
+  <div class="tiles" id="mc-tiles"></div>
+  <div class="chart" id="chart-mc"></div>
 
   <h2>Recommendation track record</h2>
   <div class="note" id="recs-note"></div>
@@ -518,7 +564,227 @@ buttons("position-buttons", ["1M", "3M", "YTD", "1Y"].map(k => [k, `Return & con
   drawContrib();
 });
 
-// ── Structure ──────────────────────────────────────────────────────────────
+// ── Stress tests ───────────────────────────────────────────────────────────
+(function stress() {
+  const S = DATA.stress || [];
+  const head = `<tr><th>Episode</th><th>Dates</th><th>Portfolio</th><th>In euros today</th><th>${BENCH.world}</th>` +
+    `<th>${BENCH.sp500}</th><th>Filled</th><th>Biggest drags</th></tr>`;
+  el("stress-table").innerHTML = head + S.map(x =>
+    `<tr><td>${x.label}</td><td>${fmtDate(x.start)} – ${fmtDate(x.end)}</td>` +
+    `<td ${shade((x.portfolio - x.world) / 0.10)}>${pct(x.portfolio)}</td><td>${eur(x.loss_eur, true)}</td>` +
+    `<td>${pct(x.world)}</td><td>${pct(x.sp500)}</td>` +
+    `<td>${x.filled.length ? `<abbr title="${x.filled.join(", ")}">${pct(x.filled_share, 0, false)}</abbr>` : "–"}</td>` +
+    `<td class="drags">${x.worst.slice(0, 3).map(w => `${w.ticker}${w.filled ? "*" : ""} <small>${pct(w.ret, 0)}</small>`).join(" · ")}</td></tr>`
+  ).join("");
+})();
+
+// ── What if ────────────────────────────────────────────────────────────────
+(function whatIf() {
+  const W = DATA.whatif;
+  if (!W || !W.dates.length) return;
+  const col = Object.fromEntries(W.tickers.map((t, i) => [t, i]));
+  const rows = P.filter(p => p.ticker in col);
+  const base = Object.fromEntries(rows.map(p => [p.ticker, p.weight]));
+  let factor = Object.fromEntries(rows.map(p => [p.ticker, 1]));
+  let windowKey = "3Y";
+  const CHOICES = [[0, "×0"], [0.5, "×½"], [1, "×1"], [2, "×2"], [3, "×3"]];
+
+  // Buy and hold, like the backtest: each position's value at a week's start is its target
+  // weight today divided by its growth from then until today. Names enter when listed.
+  function series(fac, from) {
+    const n = W.dates.length, held = rows.map(() => new Float64Array(n));
+    rows.forEach((p, j) => {
+      let v = base[p.ticker] * fac[p.ticker];
+      for (let t = n - 1; t >= from; t--) {
+        const r = W.returns[t][col[p.ticker]];
+        if (r === null) { v = 0; }
+        else if (v) { v /= 1 + r; }
+        held[j][t] = v;
+      }
+    });
+    const out = [];
+    for (let t = from; t < n; t++) {
+      let sum = 0, wsum = 0;
+      rows.forEach((p, j) => {
+        const r = W.returns[t][col[p.ticker]], v = held[j][t];
+        if (r === null || !v) return;
+        sum += v * r; wsum += v;
+      });
+      out.push(wsum ? sum / wsum : 0);
+    }
+    return out;
+  }
+  function stats(r, world) {
+    const n = r.length, years = n / 52;
+    let idx = 1, peak = 1, maxDd = 0;
+    const path = r.map(x => { idx *= 1 + x; peak = Math.max(peak, idx); maxDd = Math.min(maxDd, idx / peak - 1); return idx; });
+    const mean = r.reduce((a, b) => a + b, 0) / n;
+    const vol = Math.sqrt(r.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1) * 52);
+    const total = idx - 1, cagr = idx ** (1 / years) - 1;
+    let beta = null;
+    if (world) {
+      const wm = world.reduce((a, b) => a + b, 0) / n;
+      let cov = 0, varW = 0;
+      for (let i = 0; i < n; i++) { cov += (r[i] - mean) * (world[i] - wm); varW += (world[i] - wm) ** 2; }
+      beta = cov / varW;
+    }
+    return { total, cagr, vol, maxDd, sharpe: (cagr - DATA.risk_free) / vol, beta, path };
+  }
+
+  function weightsNow() {
+    const raw = rows.map(p => base[p.ticker] * factor[p.ticker]);
+    const sum = raw.reduce((a, b) => a + b, 0) || 1;
+    return Object.fromEntries(rows.map((p, i) => [p.ticker, raw[i] / sum]));
+  }
+  function drawList() {
+    const now = weightsNow();
+    el("whatif-list").innerHTML = "<tr><th>Position</th><th>Today</th><th>Change</th><th>New weight</th></tr>" + rows.map(p => {
+      const f = factor[p.ticker], known = CHOICES.some(([v]) => Math.abs(v - f) < 1e-9);
+      const opts = (known ? "" : `<option value="${f}" selected>×${num(f, 2)}</option>`) +
+        CHOICES.map(([v, label]) => `<option value="${v}" ${known && Math.abs(v - f) < 1e-9 ? "selected" : ""}>${label}</option>`).join("");
+      return `<tr class="${f !== 1 ? "changed" : ""}"><td class="name">${p.ticker} <small>${p.name}</small></td>` +
+        `<td>${pct(p.weight, 1, false)}</td><td><select data-t="${p.ticker}">${opts}</select></td><td>${pct(now[p.ticker], 1, false)}</td></tr>`;
+    }).join("");
+    el("whatif-list").querySelectorAll("select").forEach(sel => sel.onchange = () => {
+      factor[sel.dataset.t] = parseFloat(sel.value); update();
+    });
+  }
+  function update() {
+    drawList();
+    const from = windowKey === "1Y" ? Math.max(0, W.dates.length - 52) : 0;
+    const world = W.world.slice(from).map(v => v ?? 0);
+    const today = stats(series(Object.fromEntries(rows.map(p => [p.ticker, 1])), from), world);
+    const alt = stats(series(factor, from), world);
+    const bench = stats(world, world);
+    const ROWS = [
+      ["Return", "total", v => pct(v)], ["Return p.a.", "cagr", v => pct(v)], ["Volatility", "vol", v => pct(v, 1, false)],
+      ["Max drawdown", "maxDd", v => pct(v)], ["Sharpe", "sharpe", v => num(v)], ["Beta to World", "beta", v => num(v)],
+    ];
+    el("whatif-stats").innerHTML = `<tr><th></th><th>Today's weights</th><th>What if</th><th>${BENCH.world}</th></tr>` +
+      ROWS.map(([label, k, f]) => {
+        const better = ["total", "cagr", "sharpe", "maxDd"].includes(k) ? alt[k] - today[k] : null;
+        return `<tr><td>${label}</td><td>${f(today[k])}</td><td class="${better === null || Math.abs(better) < 1e-9 ? "" : tone(better)}">${f(alt[k])}</td><td>${f(bench[k])}</td></tr>`;
+      }).join("");
+    const x = W.dates.slice(from);
+    Plotly.react("chart-whatif", [
+      { x, y: today.path.map(v => v * 100), name: "Today's weights", line: { color: T.gold, width: 2 } },
+      { x, y: alt.path.map(v => v * 100), name: "What if", line: { color: T.burgundy, width: 2 } },
+      { x, y: bench.path.map(v => v * 100), name: BENCH.world, line: { color: T.muted, width: 1.5, dash: "dot" } },
+    ].map(t => ({ ...t, type: "scatter", mode: "lines", hovertemplate: "%{y:.1f}" })),
+      baseLayout({ margin: { l: 44, r: 10, t: 30, b: 30 } }), CONFIG);
+  }
+
+  buttons("whatif-windows", [["1Y", "Last year"], ["3Y", "3 years"]], "3Y", k => { windowKey = k; update(); });
+  const isEtf = p => p.sector === "ETF";
+  const PRESETS = {
+    reset: () => rows.forEach(p => factor[p.ticker] = 1),
+    no_etfs: () => rows.forEach(p => factor[p.ticker] = isEtf(p) ? 0 : 1),
+    only_etfs: () => rows.forEach(p => factor[p.ticker] = isEtf(p) ? 1 : 0),
+    equal: () => rows.forEach(p => factor[p.ticker] = 1 / rows.length / base[p.ticker]),
+  };
+  const box = el("whatif-presets");
+  [["reset", "Reset"], ["no_etfs", "Stocks only"], ["only_etfs", "ETFs only"], ["equal", "Equal weight"]].forEach(([k, label]) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.onclick = () => { PRESETS[k](); update(); };
+    box.appendChild(b);
+  });
+})();
+
+// ── Monte Carlo ────────────────────────────────────────────────────────────
+(function monteCarlo() {
+  const SIM = DATA.simulation;
+  const PATHS = 2000, INFLATION = 0.02;
+  const input = id => el(id);
+  input("mc-savings").value = Math.max(0, Math.round((SIM.savings || 0) / 50) * 50);
+  input("mc-years").value = 15;
+  input("mc-return").value = 7;
+  input("mc-vol").value = Math.round((SIM.volatility || 0.2) * 100);
+  input("mc-target").value = Math.max(100000, Math.ceil(SIM.value * 10 / 50000) * 50000);
+  el("mc-note").innerHTML =
+    `Starts from today's ${eur(SIM.value)} and adds the monthly saving at each month end. ` +
+    `Saving defaults to your average over the last 12 months, volatility to today's portfolio over 3 years. ` +
+    `The expected return is what the middle path grows at: about 7% is the long-run stock market average; ` +
+    `the backtest's much higher figures were earned by today's winners in hindsight and are no forecast. ` +
+    `Monthly returns are drawn at random (log-normal, ${PATHS} paths, fixed seed). Real crashes have fatter tails than this, and taxes are left out.`;
+
+  // Seeded RNG so results don't flicker as you drag a slider.
+  function rng(seed) {
+    return () => {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function quantile(sorted, q) { return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]; }
+
+  function run() {
+    const save = Math.max(0, parseFloat(input("mc-savings").value) || 0);
+    const years = +input("mc-years").value, ret = +input("mc-return").value / 100, vol = +input("mc-vol").value / 100;
+    const target = parseFloat(input("mc-target").value) || 0, real = input("mc-real").checked;
+    el("mc-years-out").textContent = years;
+    el("mc-return-out").textContent = pct(ret, 1, false);
+    el("mc-vol-out").textContent = pct(vol, 0, false);
+
+    const months = years * 12, mu = Math.log(1 + ret) / 12, sigma = vol / Math.sqrt(12);
+    const rand = rng(42);
+    const values = new Float64Array(PATHS).fill(SIM.value);
+    const bands = { p5: [], p25: [], p50: [], p75: [], p95: [] }, paid = [], x = [];
+    const start = new Date(DATA.generated);
+    let reachedAt = null;
+    for (let m = 0; m <= months; m++) {
+      if (m > 0) {
+        for (let i = 0; i < PATHS; i += 2) {
+          const u1 = rand() || 1e-12, u2 = rand(), r = Math.sqrt(-2 * Math.log(u1));
+          values[i] = values[i] * Math.exp(mu + sigma * r * Math.cos(2 * Math.PI * u2)) + save;
+          if (i + 1 < PATHS) values[i + 1] = values[i + 1] * Math.exp(mu + sigma * r * Math.sin(2 * Math.PI * u2)) + save;
+        }
+      }
+      const deflate = real ? (1 + INFLATION) ** (m / 12) : 1;
+      const sorted = Float64Array.from(values).sort();
+      for (const [k, q] of [["p5", 0.05], ["p25", 0.25], ["p50", 0.5], ["p75", 0.75], ["p95", 0.95]]) bands[k].push(quantile(sorted, q) / deflate);
+      paid.push((SIM.value + save * m) / deflate);
+      const d = new Date(start); d.setMonth(d.getMonth() + m); x.push(d.toISOString().slice(0, 10));
+      if (reachedAt === null && target && bands.p50[m] >= target) reachedAt = m;
+    }
+    const deflateEnd = real ? (1 + INFLATION) ** years : 1;
+    const hit = target ? values.filter(v => v / deflateEnd >= target).length / PATHS : null;
+    const lastM = months;
+    el("mc-tiles").innerHTML = [
+      tile(`Middle case in ${years} yrs`, eur(bands.p50[lastM]), "half the paths end higher"),
+      tile("Bad case", eur(bands.p5[lastM]), "1 in 20 paths ends lower"),
+      tile("Good case", eur(bands.p95[lastM]), "1 in 20 paths ends higher"),
+      tile("Paid in", eur(paid[lastM]), "today's value plus savings"),
+      tile(`Chance of ${eur(target)}`, hit === null ? "–" : pct(hit, 0, false),
+        reachedAt === null ? "middle case doesn't get there" : `middle case reaches it in ${num(reachedAt / 12, 1)} yrs`,
+        hit === null ? "" : tone(hit - 0.5)),
+    ].join("");
+
+    const band = (lo, hi, name, alpha) => [
+      { x, y: lo, type: "scatter", mode: "lines", line: { width: 0 }, hoverinfo: "skip", showlegend: false },
+      { x, y: hi, type: "scatter", mode: "lines", line: { width: 0 }, fill: "tonexty",
+        fillcolor: `rgba(201,169,97,${alpha})`, name, hovertemplate: `%{y:,.0f} €<extra>${name}</extra>` },
+    ];
+    Plotly.react("chart-mc", [
+      ...band(bands.p5, bands.p95, "5–95%", 0.18),
+      ...band(bands.p25, bands.p75, "25–75%", 0.35),
+      { x, y: bands.p50, type: "scatter", mode: "lines", name: "Middle case", line: { color: T.dark_gold, width: 2.5 },
+        hovertemplate: "%{y:,.0f} €<extra>Middle</extra>" },
+      { x, y: paid, type: "scatter", mode: "lines", name: "Paid in", line: { color: T.muted, width: 1.5, dash: "dot" },
+        hovertemplate: "%{y:,.0f} €<extra>Paid in</extra>" },
+      ...(target ? [{ x: [x[0], x.at(-1)], y: [target, target], type: "scatter", mode: "lines", name: "Target",
+        line: { color: T.burgundy, width: 1, dash: "dash" }, hoverinfo: "skip" }] : []),
+    ], baseLayout({ yaxis: { ticksuffix: " €", tickformat: ",.0f", gridcolor: "rgba(26,26,26,0.07)" } }), CONFIG);
+  }
+
+  let pending = false;
+  const schedule = () => { if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; run(); }); } };
+  ["mc-savings", "mc-years", "mc-return", "mc-vol", "mc-target", "mc-real"].forEach(id => input(id).addEventListener("input", schedule));
+  run();
+})();
+
+// ── Recommendation track record ────────────────────────────────────────────
 (function recommendations() {
   const recs = DATA.recommendations || [];
   el("recs-note").textContent =
@@ -545,6 +811,7 @@ buttons("position-buttons", ["1M", "3M", "YTD", "1Y"].map(k => [k, `Return & con
     `<td ${r.hit === null ? "" : shade(r.hit ? 0.8 : -0.8)}>${r.hit === null ? "–" : r.hit ? "yes" : "no"}</td></tr>`).join("");
 })();
 
+// ── Structure ──────────────────────────────────────────────────────────────
 (function structure() {
   const X = DATA.structure;
   const C = DATA.costs;

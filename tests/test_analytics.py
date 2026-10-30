@@ -7,6 +7,7 @@ import pytest
 
 import market
 from analytics import (
+    average_monthly_savings,
     buy_hold_returns,
     capture_ratios,
     concentration,
@@ -23,7 +24,9 @@ from analytics import (
     recommendation_record,
     risk_contributions,
     risk_stats,
+    stress_test,
     to_weekly,
+    window_returns,
     xirr,
 )
 from dashboard import _json_ready, render_html
@@ -291,3 +294,30 @@ def test_recommendation_record_judges_against_benchmark():
     assert rows["A"]["hit"] is False
     assert rows["B"]["hit"] is True
     assert rows["C"]["ret"] is None and rows["C"]["hit"] is None
+
+
+# ── Simulations ─────────────────────────────────────────────────────────────
+
+def test_window_returns_uses_last_close_on_or_before_dates():
+    idx = pd.to_datetime(["2024-01-02", "2024-01-05", "2024-01-10"])
+    prices = pd.DataFrame({"A": [10.0, 12.0, 15.0], "B": [np.nan, 20.0, 10.0]}, index=idx)
+    r = window_returns(prices, pd.Timestamp("2024-01-03"), pd.Timestamp("2024-01-09"))
+    assert r["A"] == pytest.approx(0.2)
+    assert np.isnan(r["B"])  # not listed yet at the start
+
+
+def test_stress_test_fills_unlisted_names_with_benchmark():
+    idx = pd.to_datetime(["2024-01-02", "2024-01-10"])
+    prices = pd.DataFrame({"A": [10.0, 8.0], "B": [np.nan, 5.0]}, index=idx)
+    ret, detail = stress_test(prices, pd.Series({"A": 0.75, "B": 0.25}), idx[0], idx[1], fill=-0.1)
+    assert ret == pytest.approx(0.75 * -0.2 + 0.25 * -0.1)
+    assert detail.loc["B", "filled"] and not detail.loc["A", "filled"]
+
+
+def test_average_monthly_savings_counts_empty_months_and_skips_current():
+    flows = [
+        dict(date="2026-08-10", invested_eur=600.0, income_eur=0.0),
+        dict(date="2026-09-03", invested_eur=600.0, income_eur=0.0),
+        dict(date="2026-10-01", invested_eur=999.0, income_eur=0.0),  # current month, left out
+    ]
+    assert average_monthly_savings(flows, date(2026, 10, 29), months=3) == pytest.approx(400.0)
