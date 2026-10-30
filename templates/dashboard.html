@@ -665,11 +665,14 @@ buttons("position-buttons", ["1M", "3M", "YTD", "1Y"].map(k => [k, `Return & con
         const better = ["total", "cagr", "sharpe", "maxDd"].includes(k) ? alt[k] - today[k] : null;
         return `<tr><td>${label}</td><td>${f(today[k])}</td><td class="${better === null || Math.abs(better) < 1e-9 ? "" : tone(better)}">${f(alt[k])}</td><td>${f(bench[k])}</td></tr>`;
       }).join("");
-    const x = W.dates.slice(from);
+    // Start every line at 100 one week before the first weekly return.
+    const first = new Date(W.dates[from] + "T00:00:00Z");
+    first.setUTCDate(first.getUTCDate() - 7);
+    const x = [first.toISOString().slice(0, 10), ...W.dates.slice(from)];
     Plotly.react("chart-whatif", [
-      { x, y: today.path.map(v => v * 100), name: "Today's weights", line: { color: T.gold, width: 2 } },
-      { x, y: alt.path.map(v => v * 100), name: "What if", line: { color: T.burgundy, width: 2 } },
-      { x, y: bench.path.map(v => v * 100), name: BENCH.world, line: { color: T.muted, width: 1.5, dash: "dot" } },
+      { x, y: [100, ...today.path.map(v => v * 100)], name: "Today's weights", line: { color: T.gold, width: 2 } },
+      { x, y: [100, ...alt.path.map(v => v * 100)], name: "What if", line: { color: T.burgundy, width: 2 } },
+      { x, y: [100, ...bench.path.map(v => v * 100)], name: BENCH.world, line: { color: T.muted, width: 1.5, dash: "dot" } },
     ].map(t => ({ ...t, type: "scatter", mode: "lines", hovertemplate: "%{y:.1f}" })),
       baseLayout({ margin: { l: 44, r: 10, t: 30, b: 30 } }), CONFIG);
   }
