@@ -230,7 +230,7 @@ _PROMPT_PERSONA = (
     "Your tone is editorial, precise, confident — like the Financial Times or The "
     "Economist. You have access to the user's full portfolio data, news, benchmarks, "
     "advanced quant metrics including Sharpe, Beta, Alpha, Sortino, VaR, Max "
-    "Drawdown, rolling 90d Sharpe and 30d/90d Beta, per-holding multi-timeframe "
+    "Drawdown, rolling 90d Sharpe and 13-week/26-week Beta, per-holding multi-timeframe "
     "momentum scores (quartile-ranked, 4=strongest), and LOOK-THROUGH EXPOSURE data "
     "showing stocks embedded inside held ETFs beyond any direct position. When present, "
     "you also get UPCOMING EVENTS (earnings and ex-dividend dates in the next 14 days) "
@@ -254,7 +254,7 @@ _PROMPT_STRUCTURE = (
     "comparison look worse. ALWAYS compare the same time period: YTD vs YTD, or "
     "fortnight vs fortnight — never mix since-inception portfolio returns against "
     "YTD benchmark returns. Reference Alpha and Beta where relevant. Where rolling "
-    "90d Sharpe or 30d/90d Beta diverge meaningfully from the full-period values, "
+    "90d Sharpe or 13-week/26-week Beta diverge meaningfully from the full-period values, "
     "note whether risk-adjusted returns or market sensitivity are improving or "
     "deteriorating.\n"
     "## (3) News & Market Context — the 3 most important implications of the news for "
@@ -427,6 +427,18 @@ def split_analysis(text: str) -> tuple[str, str]:
     return "\n\n".join(body_parts), actionable_text
 
 
+# An em/en dash, or a hyphen with spaces around it: "core-ETF" stays one word.
+_TITLE_DASH = re.compile(r"(.+?)(?:\s*[—–]\s*|\s+-\s+)(.+)")
+
+
+def split_title(text: str) -> tuple[str, str]:
+    """Split `Title — Detail` at the first separating dash; ("text", "") if there is none."""
+    m = _TITLE_DASH.match(text)
+    if not m:
+        return text.strip(), ""
+    return m.group(1).strip().rstrip(":"), m.group(2).strip()
+
+
 def parse_actionable(text: str) -> list[dict]:
     """Parse `[ACTION] Title — Detail` lines into structured items."""
     if not text:
@@ -443,12 +455,7 @@ def parse_actionable(text: str) -> list[dict]:
                 items.append(current)
             action = m.group(1).upper()
             rest = m.group(2).strip().strip("*").strip()
-            split_m = re.match(r"(.+?)\s*[—–-]\s*(.+)", rest)
-            if split_m:
-                title = split_m.group(1).strip().rstrip(":")
-                detail = split_m.group(2).strip()
-            else:
-                title, detail = rest, ""
+            title, detail = split_title(rest)
             current = dict(action=action, title=title, detail=detail)
         elif current and line:
             # Continuation

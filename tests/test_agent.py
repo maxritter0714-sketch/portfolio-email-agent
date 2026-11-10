@@ -241,6 +241,15 @@ def test_parse_actionable_caps_at_five():
     lines = "\n".join(f"[TRIM] Item {i} — Detail {i}." for i in range(8))
     assert len(parse_actionable(lines)) == 5
 
+def test_parse_actionable_keeps_hyphenated_title():
+    items = parse_actionable("[ADD] Close the core-ETF shortfall — Core ETFs sit at 38%.")
+    assert items[0]["title"] == "Close the core-ETF shortfall"
+    assert items[0]["detail"] == "Core ETFs sit at 38%."
+
+def test_parse_actionable_splits_on_spaced_hyphen():
+    items = parse_actionable("[TRIM] Reduce NVDA - Too big.")
+    assert (items[0]["title"], items[0]["detail"]) == ("Reduce NVDA", "Too big.")
+
 def test_parse_actionable_empty():
     assert parse_actionable("") == []
 
@@ -326,6 +335,14 @@ def test_load_recommendations_empty_without_log(tmp_path, monkeypatch):
 
 
 # ── _markdown_to_html ─────────────────────────────────────────────────────────
+
+def test_markdown_implications_become_separate_paragraphs():
+    out = _markdown_to_html(
+        "[IMPLICATION] Nvidia risk — CEO probe.\n[IMPLICATION] Tech selloff — Hits AMZN."
+    )
+    assert "[IMPLICATION]" not in out
+    assert out.count("<p ") == 2
+    assert "<strong>Nvidia risk</strong> — CEO probe." in out
 
 def test_markdown_h2_produces_h3():
     result = _markdown_to_html("## Section Heading")

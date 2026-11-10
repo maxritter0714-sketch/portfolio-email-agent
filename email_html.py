@@ -6,6 +6,7 @@ import os
 import re
 from datetime import date
 
+from claude_report import split_title
 from theme import (
     BG_CREAM, BURGUNDY, CHARCOAL, DARK_GOLD, GOLD, NAVY,
     RULE_FAINT, SAGE, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -187,6 +188,12 @@ def _markdown_to_html(text: str) -> str:
                 f'margin:24px 0 10px;font-weight:normal;font-style:italic">'
                 f'{inline(stripped[3:].strip())}</h3>'
             )
+        elif stripped.upper().startswith("[IMPLICATION]"):
+            # News implications: one paragraph each, title in bold.
+            close_ul(); close_p()
+            title, detail = split_title(stripped[len("[IMPLICATION]"):].strip())
+            body = f"<strong>{inline(title)}</strong>" + (f" — {inline(detail)}" if detail else "")
+            html_parts.append(f'<p style="margin:0 0 14px;line-height:1.7">{body}</p>')
         elif re.match(r"^[-*]\s+", stripped):
             close_p()
             if not in_ul:
