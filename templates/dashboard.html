@@ -833,6 +833,10 @@ buttons("position-buttons", ["1M", "3M", "YTD", "1Y"].map(k => [k, `Return & con
     tile("<abbr title='Ongoing charges (TER, from Yahoo) of your ETFs, weighted by value. Single stocks cost nothing to hold.'>Fund costs</abbr>",
       `${eur(C.ter_cost)} <small>/ yr</small>`,
       `${pct(C.ter_portfolio, 2, false)} of portfolio · ${pct(C.ter_etfs, 2, false)} on ETFs` + (C.missing_ter.length ? ` · no TER: ${C.missing_ter.join(", ")}` : "")),
+    tile("<abbr title='1 € per one-off buy or sell order; savings plans are free. The fee is already inside the money paid in, so it is shown here, not deducted again.'>Order fees</abbr>",
+      C.orders ? `${eur(C.orders.fees)} <small>so far</small>` : "–",
+      C.orders ? `${num(C.orders.orders, 0)} orders · ${eur(C.orders.fees_12m)} in 12M · ${pct(C.orders.share_of_paid_in, 2, false)} of paid in`
+               : "re-run import_cashflows.py"),
     tile("<abbr title='Dividends paid over the last 12 months by the shares you hold today. Accumulating ETFs reinvest internally and show none.'>Dividends, trailing 12M</abbr>",
       `${eur(C.dividends)} <small>/ yr</small>`, `${pct(C.dividend_yield, 2, false)} yield`),
   ].join("");

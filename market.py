@@ -1047,13 +1047,18 @@ _CASHFLOWS_PATH = DATA_DIR / "cashflows.csv"
 
 
 def load_cashflows(path: Path = _CASHFLOWS_PATH) -> list[dict]:
-    """Daily invested/income totals written by import_cashflows.py, or [] if absent."""
+    """Daily invested/income totals written by import_cashflows.py, or [] if absent.
+
+    `orders` (one-off orders that day) is None for files written before that
+    column existed.
+    """
     if not path.exists():
         return []
     with open(path, newline="", encoding="utf-8-sig") as fh:
         rows = list(csv.DictReader(fh))
     return [
-        dict(date=r["date"], invested_eur=float(r["invested_eur"]), income_eur=float(r["income_eur"]))
+        dict(date=r["date"], invested_eur=float(r["invested_eur"]), income_eur=float(r["income_eur"]),
+             orders=int(r["orders"]) if (r.get("orders") or "").strip().isdigit() else None)
         for r in rows
         if r.get("date") and _is_float(r.get("invested_eur")) and _is_float(r.get("income_eur"))
     ]

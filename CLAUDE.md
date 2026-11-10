@@ -18,7 +18,7 @@ Stack: Python · yfinance · NewsAPI · Anthropic Claude · Gmail SMTP
 | `email_html.py` | HTML email builder |
 | `theme.py` | Shared colours for charts and email |
 | `import_portfolio.py` | Converts Finanzfluss export CSV → `data/portfolio.csv` |
-| `import_cashflows.py` | Reduces the Finanzfluss transactions export → daily `data/cashflows.csv` (only invested + dividends; private spending stays local) |
+| `import_cashflows.py` | Reduces the Finanzfluss transactions export → daily `data/cashflows.csv` (only invested, dividends and one-off order count; private spending stays local) |
 | `paths.py` | `DATA_DIR` (`data/`) and `OUTPUT_DIR` (`output/`) — all file locations hang off these |
 | `data/` | All personal files, gitignored except `*.example`: `finanzfluss_export.csv`, `portfolio.csv`, `history.csv`, `conviction.json` (latest advice per name, for the prompt), `recommendations.csv` (append-only log of every recommendation, for the dashboard), `cashflows.csv`, `isin_map.json`, `targets.json` |
 | `output/` | `agent.log`, `preview.html`, `dashboard.html` (gitignored) |

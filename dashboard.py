@@ -321,7 +321,7 @@ def build_payload(
             regions=shares_of(region_exposure(positions)),
             currencies=shares_of(currency_exposure(positions)),
         ),
-        costs=_costs(positions, total_value),
+        costs=dict(_costs(positions, total_value), orders=an.order_costs(cashflows, today)),
         recommendations=an.recommendation_record(
             recs or [], prices if rec_prices is None else prices.join(rec_prices, how="outer"),
             bench_prices["world"]),

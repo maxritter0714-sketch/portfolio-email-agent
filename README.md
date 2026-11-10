@@ -252,7 +252,7 @@ The masthead can split the value change into money you paid in and actual market
 python import_cashflows.py --input data/finanzfluss_transactions.csv
 ```
 
-This writes `data/cashflows.csv` with only daily totals of money invested (buys minus sells) and dividends/interest — private spending, counterparties and transfers are dropped. Upload `cashflows.csv` (never the raw export) to your private data repo for GitHub Actions. The split runs from the first history entry of the current year, and the email warns when the cash-flow data is more than 30 days old. Both files are gitignored.
+This writes `data/cashflows.csv` with only daily totals of money invested (buys minus sells), dividends/interest and the number of one-off orders (for the dashboard's order-fees tile; savings plans are free and not counted) — private spending, counterparties and transfers are dropped. Upload `cashflows.csv` (never the raw export) to your private data repo for GitHub Actions. The split runs from the first history entry of the current year, and the email warns when the cash-flow data is more than 30 days old. Both files are gitignored.
 
 The same data drives the **Total** figure in the masthead: current value minus everything paid in since the first booking, so it includes realised gains and losses of sold positions. This only holds if every purchase ran through that one cash account and the export covers its full history — positions bought through another broker or moved in by a securities transfer (Depotübertrag) would show up as gains. Without `cashflows.csv` the Total figure is simply left out.
 
@@ -270,7 +270,7 @@ This writes `output/dashboard.html`, a single file you open locally (it loads Pl
 - **Your actual record** — net paid in vs value, total gain and your money-weighted return p.a. (XIRR), from `cashflows.csv` and `history.csv` (section 9); what the same deposits would be worth in the MSCI World or S&P 500; money paid in and income per month.
 - **Backtest of today's portfolio** — today's share counts held unchanged over up to 7 years against the S&P 500 and MSCI World (as the iShares Core ETFs SXR8 and EUNL on Xetra: in EUR, net of fund fees): range buttons, drawdown, returns by period, monthly heatmap, risk table (Sharpe, Sortino, beta, tracking error, capture ratios, VaR…) and rolling metrics. This shows how your current holdings behave, not your actual past performance.
 - **Positions** — sortable table with return and contribution per period, volatility, beta, risk share and momentum.
-- **Structure** — concentration, diversification ratio, fund costs (TER) and trailing dividends, sectors, regions, currencies looked through to the underlying assets, weight vs risk share and a correlation heatmap.
+- **Structure** — concentration, diversification ratio, fund costs (TER), order fees (1 € per one-off order, already inside the money paid in) and trailing dividends, sectors, regions, currencies looked through to the underlying assets, weight vs risk share and a correlation heatmap.
 - **Simulations** — stress tests (today's holdings through Covid 2020, the 2022 rate shock, the 2024 yen carry unwind and the 2025 tariff shock), a what-if tool to re-weight positions, and a Monte Carlo projection with sliders for saving, years, return and volatility.
 - **Recommendation track record** — every recommendation in `recommendations.csv` (append-only log written by each report; falls back to `conviction.json`) against the MSCI World since the day it was made, with hit rates per action.
 

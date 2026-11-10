@@ -478,6 +478,30 @@ def stress_test(prices: pd.DataFrame, weights: pd.Series, start: pd.Timestamp, e
     return float(contrib.sum()), pd.DataFrame({"ret": ret, "contrib": contrib, "filled": filled})
 
 
+ORDER_FEE_EUR = 1.0  # Trade Republic's external fee per one-off order; savings plans are free
+
+
+def order_costs(cashflows: list[dict], today: date) -> dict | None:
+    """Order fees paid so far and over the last 12 months.
+
+    The fee is already inside the invested amounts (the broker books it with
+    the trade), so this only makes it visible; nothing is deducted again.
+    None when cashflows.csv predates the `orders` column.
+    """
+    if not cashflows or any(c.get("orders") is None for c in cashflows):
+        return None
+    cutoff = (pd.Timestamp(today) - pd.DateOffset(years=1)).date().isoformat()
+    orders = sum(c["orders"] for c in cashflows)
+    orders_12m = sum(c["orders"] for c in cashflows if c["date"] > cutoff)
+    paid_in = sum(c["invested_eur"] for c in cashflows)
+    fees = orders * ORDER_FEE_EUR
+    return dict(
+        orders=orders, fees=fees,
+        orders_12m=orders_12m, fees_12m=orders_12m * ORDER_FEE_EUR,
+        share_of_paid_in=fees / paid_in if paid_in > 0 else None,
+    )
+
+
 def average_monthly_savings(cashflows: list[dict], today: date, months: int = 12) -> float | None:
     """Mean net money paid in per month over the last `months` full months (empty months count as 0)."""
     if not cashflows:

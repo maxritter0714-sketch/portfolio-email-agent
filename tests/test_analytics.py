@@ -18,6 +18,7 @@ from analytics import (
     index_from_returns,
     monthly_flows,
     monthly_returns,
+    order_costs,
     period_return,
     period_start,
     portfolio_xirr,
@@ -327,6 +328,24 @@ def test_stress_test_fills_unlisted_names_with_benchmark():
     ret, detail = stress_test(prices, pd.Series({"A": 0.75, "B": 0.25}), idx[0], idx[1], fill=-0.1)
     assert ret == pytest.approx(0.75 * -0.2 + 0.25 * -0.1)
     assert detail.loc["B", "filled"] and not detail.loc["A", "filled"]
+
+
+def test_order_costs_totals_and_trailing_year():
+    flows = [
+        dict(date="2025-06-01", invested_eur=900.0, income_eur=0.0, orders=4),
+        dict(date="2025-11-10", invested_eur=50.0, income_eur=0.0, orders=1),   # exactly a year ago: outside
+        dict(date="2026-03-01", invested_eur=50.0, income_eur=0.0, orders=2),
+    ]
+    c = order_costs(flows, date(2026, 11, 10))
+    assert (c["orders"], c["fees"]) == (7, 7.0)
+    assert (c["orders_12m"], c["fees_12m"]) == (2, 2.0)
+    assert c["share_of_paid_in"] == pytest.approx(7.0 / 1000.0)
+
+
+def test_order_costs_none_for_old_cashflows_format():
+    assert order_costs([dict(date="2026-01-01", invested_eur=1.0, income_eur=0.0, orders=None)],
+                       date(2026, 11, 10)) is None
+    assert order_costs([], date(2026, 11, 10)) is None
 
 
 def test_average_monthly_savings_counts_empty_months_and_skips_current():

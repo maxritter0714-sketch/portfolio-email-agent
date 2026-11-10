@@ -7,6 +7,9 @@ flows in cashflows.csv. Only two categories are kept, summed per day:
 
   invested_eur -- money moved into securities (buys minus sells)
   income_eur   -- dividends and interest paid to the cash account
+  orders       -- number of one-off buy/sell orders (each carries a 1 EUR
+                  fee already inside invested_eur); savings plans are free
+                  and not counted
 
 Everything else in the export (private spending, transfers, counterparties)
 is dropped, so cashflows.csv is safe to upload to the private data repo
@@ -29,7 +32,15 @@ from paths import DATA_DIR
 DEFAULT_ACCOUNT = "Trade Republic Verrechnungskonto"
 INVESTED_CATEGORY = "Wertpapieranlage"
 INCOME_CATEGORY = "Kapitaleinkommen"
-OUTPUT_COLUMNS = ("date", "invested_eur", "income_eur")
+OUTPUT_COLUMNS = ("date", "invested_eur", "income_eur", "orders")
+# Reference prefixes of one-off orders (Trade Republic). Savings plans
+# ("Saving executed"), round-ups, saveback, warrant exercises and the
+# Vorabpauschale are not orders and carry no order fee.
+ORDER_PREFIXES = ("buy order", "sell order", "stop buy", "stop sell", "limit buy", "limit sell")
+
+
+def is_order(reference: str) -> bool:
+    return reference.strip().lower().startswith(ORDER_PREFIXES)
 
 
 def daily_cashflows(rows: list[dict], account: str = DEFAULT_ACCOUNT) -> list[dict]:
@@ -42,6 +53,7 @@ def daily_cashflows(rows: list[dict], account: str = DEFAULT_ACCOUNT) -> list[di
     """
     invested: dict[str, float] = defaultdict(float)
     income: dict[str, float] = defaultdict(float)
+    orders: dict[str, int] = defaultdict(int)
     last_day = ""
     for row in rows:
         if row.get("Konto", "").strip() != account:
@@ -54,13 +66,16 @@ def daily_cashflows(rows: list[dict], account: str = DEFAULT_ACCOUNT) -> list[di
         amount = float(row["Betrag"])
         if category == INVESTED_CATEGORY:
             invested[day] -= amount
+            if is_order(row.get("Referenz", "")):
+                orders[day] += 1
         else:
             income[day] += amount
     # A zero row on the export's last booking day marks how far the data
     # reaches, even when nothing was invested in the final weeks.
     days = sorted(set(invested) | set(income) | ({last_day} if last_day else set()))
     return [
-        {"date": d, "invested_eur": round(invested[d], 2), "income_eur": round(income[d], 2)}
+        {"date": d, "invested_eur": round(invested[d], 2), "income_eur": round(income[d], 2),
+         "orders": orders[d]}
         for d in days
     ]
 
