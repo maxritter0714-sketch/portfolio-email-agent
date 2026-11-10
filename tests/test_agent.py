@@ -739,6 +739,28 @@ def test_beta_near_zero_when_usd_holding_is_flat_in_eur(monkeypatch):
     assert result["beta"] == pytest.approx(0.0, abs=0.05)
 
 
+def test_beta_uses_weekly_returns_so_one_day_lag_does_not_hide_comovement(monkeypatch):
+    # A Xetra listing of a US index moves a day after New York closes.
+    # On daily returns that lag drives beta to ~0; on weekly returns it
+    # mostly cancels out and beta stays close to 1.
+    n = 260
+    idx = pd.bdate_range("2025-01-03", periods=n)
+    rng = np.random.default_rng(7)
+    spx_ret = pd.Series(rng.normal(0.0, 0.01, n), index=idx)
+    spx = 100.0 * (1.0 + spx_ret).cumprod()
+    lagged = 100.0 * (1.0 + spx_ret.shift(1).fillna(0.0)).cumprod()
+    monkeypatch.setattr(market, "_fx_hist_cache", {"USD": pd.Series(1.0, index=idx)})
+    monkeypatch.setattr(market, "_hist_cache", {"LAG": lagged, "^GSPC": spx})
+    positions = [{
+        "ticker": "LAG", "name": "Lagged", "value_eur": 1000.0,
+        "pl_pct": 1.0, "currency": "EUR",
+    }]
+    result = compute_advanced_metrics(positions, {"USD": 1.0, "EUR": 1.0})
+    assert result["beta"] > 0.6
+    assert result["correlation"] > 0.6
+    assert result["beta_13w"] is not None and result["beta_26w"] is not None
+
+
 def test_metrics_eur_benchmark_note_in_footer():
     html_out = _minimal_email(metrics={"sharpe": 1.0, "beta": 1.0, "alpha": 0.0})
     assert "S&P 500 in euro terms" in html_out

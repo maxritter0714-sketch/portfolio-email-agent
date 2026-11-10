@@ -764,7 +764,9 @@ def build_html_email(
         notes_parts.append(f"Not in this report (ISIN not mapped to a ticker): {missing}.")
     if metrics:
         notes_parts.append(
-            "Beta, alpha, and correlation are versus the S&P 500 in euro terms."
+            "Beta, alpha, and correlation are versus the S&P 500 in euro terms. "
+            "Beta and correlation use weekly returns, because Xetra and New York "
+            "close at different times."
         )
     if skipped:
         omitted = ", ".join(

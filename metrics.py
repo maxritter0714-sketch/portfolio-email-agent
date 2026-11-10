@@ -9,6 +9,7 @@ import pandas as pd
 import yfinance as yf
 
 import market
+from analytics import to_weekly
 from market import _to_eur_close
 
 log = logging.getLogger(__name__)
@@ -133,7 +134,15 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
     down_vol = np.std(neg, ddof=1) * np.sqrt(TDAYS) if len(neg) > 1 else ann_vol
     sortino = (ann_ret - RISK_FREE) / down_vol if down_vol else 0.0
 
-    cov = np.cov(pr, sr)
+    # Beta and correlation on weekly returns: Xetra closes hours before New
+    # York, so daily EUR listings lag US moves by a day and daily co-movement
+    # comes out wrong (see analytics.to_weekly). Return/risk figures of the
+    # portfolio alone stay daily.
+    weekly = to_weekly(pd.DataFrame({"p": pr, "s": sr}, index=common_idx)).dropna()
+    pr_w = weekly["p"].to_numpy(dtype=float)
+    sr_w = weekly["s"].to_numpy(dtype=float)
+
+    cov = np.cov(pr_w, sr_w)
     beta = cov[0, 1] / cov[1, 1] if cov[1, 1] else 1.0
     alpha = ann_ret - (RISK_FREE + beta * (sp500_ann - RISK_FREE))
 
@@ -145,11 +154,11 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
     var_95 = float(np.percentile(pr, 5))
     # Full-period (not rolling) Expected Shortfall: mean return in the worst 5% of all-time daily returns.
     cvar_95 = float(np.mean(pr[pr <= np.percentile(pr, 5)]))
-    correlation = float(np.corrcoef(pr, sr)[0, 1])
+    correlation = float(np.corrcoef(pr_w, sr_w)[0, 1])
 
     sharpe_90d = _trailing_sharpe(pr, 90, RISK_FREE, TDAYS)
-    beta_30d = _trailing_beta(pr, sr, 30)
-    beta_90d = _trailing_beta(pr, sr, 90)
+    beta_13w = _trailing_beta(pr_w, sr_w, 13)
+    beta_26w = _trailing_beta(pr_w, sr_w, 26)
     vol_30d = _trailing_vol(pr, 30, TDAYS)
 
     hhi = sum((p["value_eur"] / total_val) ** 2 for p in positions) if total_val else 0.0
@@ -164,7 +173,7 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
         volatility=ann_vol, max_drawdown=max_dd, calmar=calmar,
         var_95=var_95, correlation=correlation, hhi=hhi, win_rate=win_rate,
         cvar_95=cvar_95, sharpe_90d=sharpe_90d,
-        beta_30d=beta_30d, beta_90d=beta_90d, vol_30d=vol_30d,
+        beta_13w=beta_13w, beta_26w=beta_26w, vol_30d=vol_30d,
     )
 
 

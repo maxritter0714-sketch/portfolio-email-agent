@@ -76,13 +76,13 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
     )
     metrics_text = ""
     if metrics:
-        beta_30d_str = f"{metrics['beta_30d']:.2f}" if metrics.get("beta_30d") is not None else "n/a"
-        beta_90d_str = f"{metrics['beta_90d']:.2f}" if metrics.get("beta_90d") is not None else "n/a"
+        beta_13w_str = f"{metrics['beta_13w']:.2f}" if metrics.get("beta_13w") is not None else "n/a"
+        beta_26w_str = f"{metrics['beta_26w']:.2f}" if metrics.get("beta_26w") is not None else "n/a"
         metrics_text = (
             f"\nADVANCED METRICS\n"
             f"Sharpe Ratio: {metrics.get('sharpe', 0):.2f} | "
             f"Sortino Ratio: {metrics.get('sortino', 0):.2f}\n"
-            f"Beta vs S&P 500 (EUR): {metrics.get('beta', 0):.2f} | "
+            f"Beta vs S&P 500 (EUR, weekly returns): {metrics.get('beta', 0):.2f} | "
             f"Alpha (annualized, vs S&P 500 in EUR): {metrics.get('alpha', 0)*100:+.2f}%\n"
             f"Annualized Volatility: {metrics.get('volatility', 0)*100:.1f}% | "
             f"Max Drawdown: {metrics.get('max_drawdown', 0)*100:.1f}%\n"
@@ -93,7 +93,7 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
             f"Above cost (share of names with price above average buy): "
             f"{metrics.get('win_rate', 0):.1f}%\n"
             f"Rolling Sharpe (90d): {metrics.get('sharpe_90d', 0):.2f} | "
-            f"Rolling Beta (30d/90d): {beta_30d_str} / {beta_90d_str}\n"
+            f"Rolling Beta (13w/26w, weekly returns): {beta_13w_str} / {beta_26w_str}\n"
             f"Rolling Volatility (30d, annualized): {metrics.get('vol_30d', 0)*100:.1f}% | "
             f"CVaR 95% (Expected Shortfall, full 1Y period — not rolling): {metrics.get('cvar_95', 0)*100:.2f}%"
         )
