@@ -1,61 +1,112 @@
 ﻿# Portfolio Email Agent
 
-Sends you a polished HTML portfolio report every **other Saturday**.  
-The report includes live prices, P&L, benchmark comparison, curated news, and a four-section AI analysis from Claude.
+A fortnightly portfolio briefing in your inbox. Every other Saturday it values your holdings in EUR, compares them with the S&P 500, Nasdaq and MSCI World, picks the news that matters for what you own, and has Claude write the analysis and three to five concrete suggestions. An optional local dashboard goes deeper on the same data.
 
-> **Heads up:** This project was built for personal use and may require some adaptation before it works out of the box for you. In particular:
-> - **ISIN → ticker overrides** live in `data/isin_map.json` (gitignored, not included). Copy `data/isin_map.json.example` to get started — most ISINs are resolved automatically via OpenFIGI
-> - The **sector and region classification** in `market.py` is resolved dynamically from yfinance — no hardcoded maps to maintain
-> - The **Finanzfluss import script** expects column names from a Finanzfluss export — other brokers will need column name adjustments
-> - The agent is built around **EUR as base currency**
+<p align="center">
+  <img src="docs/images/email-overview.png" width="560" alt="Email masthead: total value, fortnight P&L, weekly/monthly/YTD/total returns, headline, risk metrics and the positions table">
+</p>
+
+<sub>All screenshots come from a made-up demo portfolio (`docs/demo/`) priced with real market data. No real holdings are shown.</sub>
 
 ---
 
-## Prerequisites
+## What you get
+
+**The email** (every other Saturday, the main product)
+- Masthead with value, fortnight P&L, weekly / monthly / YTD / total return, and a split of the value change into *money paid in* vs *market gain*
+- A one-line headline and a risk panel: Sharpe, Sortino, beta, alpha, max drawdown, VaR, volatility, concentration
+- Positions table, a deposit-free portfolio index against the S&P 500, allocation, sector and region charts, top and bottom movers
+- **The Analysis** by Claude: performance, benchmark comparison, and what the news means for *this* portfolio
+- **Actionable**: 3–5 suggestions (ADD / TRIM / EXIT / RESEARCH), aware of what it recommended before
+- Allocation vs your targets, upcoming earnings and ex-dividend dates, and a track record of earlier recommendations
+
+**The dashboard** (optional, local, prices only, no Claude)
+- Your actual record: paid in vs value, money-weighted return, the same deposits in an MSCI World ETF
+- A backtest of today's holdings, risk and rolling metrics, look-through structure, stress tests, what-if, Monte Carlo, and the hit rate of every recommendation
+
+**Behind both:** a daily snapshot after the New York close builds a price history that deposits can't distort.
+
+---
+
+## Screenshots
+
+### Email
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/email-history.png" alt="Portfolio vs S&P 500 indexed chart"><br><sub>Deposit-free portfolio index vs the S&P 500 in EUR</sub></td>
+    <td width="50%"><img src="docs/images/email-actionable.png" alt="Actionable suggestions and allocation vs target"><br><sub>Suggestions that refer back to earlier calls, plus target drift</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary>The Analysis section</summary>
+<img src="docs/images/email-analysis.png" width="560" alt="Claude's written analysis of performance and benchmarks">
+</details>
+
+### Dashboard
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/dashboard-record.png" alt="Actual record: value vs paid in"><br><sub>Your actual record vs the same deposits in ETFs</sub></td>
+    <td width="50%"><img src="docs/images/dashboard-backtest.png" alt="Backtest of today's holdings with drawdown"><br><sub>Backtest of today's holdings</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/dashboard-structure.png" alt="Structure tiles, sectors, regions, currencies, risk share"><br><sub>Structure, look-through exposure, risk share</sub></td>
+    <td width="50%"><img src="docs/images/dashboard-montecarlo.png" alt="Monte Carlo projection with sliders"><br><sub>Monte Carlo savings projection</sub></td>
+  </tr>
+</table>
+
+---
+
+## Quick start
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env                                  # add your API keys (step 2)
+cp data/portfolio.csv.example data/portfolio.csv      # your holdings (step 4)
+python agent.py --force --preview                     # writes output/preview.html, sends nothing
+```
+
+Open `output/preview.html` in a browser. When it looks right, set up Gmail (step 2) and the GitHub Actions schedule (step 6).
+
+> **Heads up:** this was built for personal use and may need some adapting:
+> - It is built around **EUR as the base currency**
+> - The import scripts expect a **Finanzfluss** export; other brokers need different column names, or a hand-kept `portfolio.csv`
+> - **ISIN → ticker overrides** live in `data/isin_map.json` (gitignored). Most ISINs resolve automatically via OpenFIGI; copy `data/isin_map.json.example` only if you need corrections
+
+---
+
+## Setup
+
+### Prerequisites
 
 - Python 3.11 or newer
 - A Gmail account with 2-Step Verification enabled
+- API keys for Anthropic and NewsAPI (free tier is enough)
 
----
-
-## 1 — Install dependencies
+### 1 — Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
----
+### 2 — Get your API keys
 
-## 2 — Get your API keys
+**Anthropic:** [console.anthropic.com](https://console.anthropic.com) → **API Keys** → **Create Key**.
 
-### Anthropic API key
-1. Go to [console.anthropic.com](https://console.anthropic.com) → **API Keys**
-2. Click **Create Key**, copy it
+**NewsAPI:** sign up at [newsapi.org/register](https://newsapi.org/register) and copy the key from the dashboard.
 
-### NewsAPI key
-1. Go to [newsapi.org/register](https://newsapi.org/register)
-2. Sign up for a free account, copy your API key from the dashboard
+**Gmail App Password:** Gmail needs an App Password for SMTP when 2-Step Verification is on.
+1. [Google Account](https://myaccount.google.com) → **Security** → **2-Step Verification** (turn it on if needed)
+2. At the bottom: **App passwords** → name it "Portfolio Agent"
+3. Copy the 16-character password
 
-### Gmail App Password
-Gmail requires an **App Password** instead of your regular password when using SMTP with 2-Step Verification.
-
-1. Go to your [Google Account](https://myaccount.google.com) → **Security**
-2. Under "How you sign in to Google", open **2-Step Verification** (enable it if not already on)
-3. Scroll to the bottom → **App passwords**
-4. Select app: **Mail**, device: **Other** → name it "Portfolio Agent"
-5. Copy the 16-character password (no spaces needed)
-
----
-
-## 3 — Configure your secrets
-
-Copy the example file and fill it in:
+### 3 — Configure your secrets
 
 ```bash
 cp .env.example .env
 ```
-
-Edit `.env`:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
@@ -65,17 +116,13 @@ GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
 RECIPIENT_EMAIL=you@gmail.com
 ```
 
-> **Security:** Never commit `.env` to version control. Add it to `.gitignore`.
+`.env` is gitignored. Never commit it. Set `CLAUDE_MODEL` to override the default model.
 
----
+### 4 — Set up your portfolio
 
-## 4 — Set up your portfolio
+> **Finanzfluss user?** Skip this and use the [import script](#7--update-your-holdings-finanzfluss-users). It writes `data/portfolio.csv` for you.
 
-> **Finanzfluss user?** Skip the manual edit below and use the [import script](#7--update-your-holdings-finanzfluss-users) (step 7) instead — it generates `data/portfolio.csv` for you.
-
-All personal files live in `data/` — gitignored except the `*.example` templates — and logs and previews go to `output/`.
-
-Copy `data/portfolio.csv.example` to `data/portfolio.csv` and fill in your real holdings:
+All personal files live in `data/` (gitignored except the `*.example` templates); logs and previews go to `output/`.
 
 ```
 ticker,name,shares,avg_buy_price
@@ -83,195 +130,182 @@ AAPL,Apple,10,150.00
 NVDA,Nvidia,5,480.00
 ```
 
-**Column notes:**
-- `ticker` — Yahoo Finance symbol (e.g. `AAPL`, `MSFT`, `BTC-USD`)
-- `name` — Human-readable name used for news searches (e.g. `Apple`, `Nvidia`)
-- `shares` — Quantity you hold
-- `avg_buy_price` — Your average purchase price **in EUR**
+- `ticker`: Yahoo Finance symbol (`AAPL`, `SXR8.DE`, `BTC-USD`)
+- `name`: readable name, also used for news searches
+- `shares`: quantity held
+- `avg_buy_price`: average purchase price **in EUR**
 
-> If your brokerage shows prices in USD, convert your buy prices to EUR at the rate you paid.
-
----
-
-## 5 — Test it
-
-Build the report locally without sending anything, using `--preview` (writes `output/preview.html` instead of emailing — no Gmail setup required for this step):
+### 5 — Test it
 
 ```bash
-python agent.py --preview
+python agent.py --force --preview   # build output/preview.html, no email, nothing saved
+python agent.py --force             # send a real email now
 ```
 
-Once that looks right, run with `--force` to bypass the fortnight schedule check and send a real email:
+`--force` skips the fortnight schedule check. Problems end up in `output/agent.log`.
 
-```bash
-python agent.py --force
-```
+### 6 — Schedule it
 
-You should receive an email within about 30 seconds. Check `output/agent.log` if something goes wrong.
+#### GitHub Actions (recommended)
 
----
+Runs in the cloud; your data stays in a separate private repo.
 
-## 6 — Schedule it
-
-### GitHub Actions (recommended)
-
-The cleanest setup — runs in the cloud, no local machine required, secrets stored encrypted.
-
-1. Create a private GitHub repo (e.g. `portfolio-agent-data`) and upload your holdings there: either `finanzfluss_export.csv` (converted on every run) or a hand-kept `portfolio.csv` (used as is). `history.csv`, `conviction.json` and `recommendations.csv` are created by the first run — only upload them if you already have them from local runs. If you use Finanzfluss import overrides, also upload your `isin_map.json` (see [step 7](#7--update-your-holdings-finanzfluss-users)) — otherwise it won't be picked up by cloud runs
-2. Create a fine-grained Personal Access Token scoped to that private repo with **Contents: Read and write**
-3. Add secrets to your public repo under **Settings → Secrets and variables → Actions**:
-   - `DATA_REPO_TOKEN` — the PAT from step 2
+1. Create a **private** repo (e.g. `portfolio-agent-data`) and upload your holdings: `finanzfluss_export.csv` (converted on every run) or a hand-kept `portfolio.csv`. Add `isin_map.json`, `targets.json` and `cashflows.csv` if you use them. `history.csv`, `conviction.json` and `recommendations.csv` are created by the first run
+2. Create a fine-grained Personal Access Token for that repo with **Contents: Read and write**
+3. In this repo, under **Settings → Secrets and variables → Actions**, add:
+   - `DATA_REPO_TOKEN`: the token from step 2
    - `ANTHROPIC_API_KEY`, `NEWS_API_KEY`, `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `RECIPIENT_EMAIL`
-4. If your private data repo is not `maxritter0714-sketch/portfolio-agent-data`, add an Actions **variable** `PORTFOLIO_DATA_REPO` set to `owner/name`.
-5. The included `.github/workflows/report.yml` runs every Saturday at 6am UTC automatically, and `.github/workflows/snapshot.yml` records a data point every weekday at 22:30 UTC (after the New York close)
+   - optional: `OPENFIGI_API_KEY`
+4. If your data repo isn't `maxritter0714-sketch/portfolio-agent-data`, add an Actions **variable** `PORTFOLIO_DATA_REPO=owner/name`
 
-The snapshot job writes one `history.csv` row per trading day (prices only, no Claude, no email); the report sends the full email every other Saturday. Rows are dated by the trading day their prices come from, so the Saturday run reuses Friday's row instead of adding a duplicate. `history.csv`, `conviction.json` and `recommendations.csv` are pushed back to the private repo after each run so they persist between executions.
+Two workflows then run on their own:
 
-To trigger a test run: **Actions → Portfolio Report → Run workflow → tick Force full report**.
+| Workflow | When | What |
+|---|---|---|
+| `snapshot.yml` | Mon–Fri 22:30 UTC | One `history.csv` row per trading day (prices only: no Claude, no email) |
+| `report.yml` | Saturdays 06:00 UTC | Fills Friday's row if the snapshot missed it; sends the full email on every other Saturday |
 
-### Mac / Linux (cron)
+Both push `history.csv`, `conviction.json` and `recommendations.csv` back to the private repo and share a concurrency group, so they never push at the same time. For a test email: **Actions → Portfolio Report → Run workflow → Force full report**.
 
-Open your crontab:
+#### Mac / Linux (cron)
+
+```cron
+# full report; the script itself checks for a send Saturday
+0 8 * * 6     cd /path/to/portfolioAgent && /usr/bin/python3 agent.py >> output/agent.log 2>&1
+# daily data point after the New York close
+30 22 * * 1-5 cd /path/to/portfolioAgent && /usr/bin/python3 agent.py --data-only >> output/agent.log 2>&1
+```
+
+### 7 — Update your holdings (Finanzfluss users)
+
+1. Finanzfluss → **Portfolio** → **Depot** → **Export**, save as `data/finanzfluss_export.csv`
+2. Run:
 
 ```bash
-crontab -e
+python import_portfolio.py --input data/finanzfluss_export.csv
 ```
 
-Add this line to run at 08:00 on every Saturday (the script self-checks for a fortnight send Saturday):
+ISINs are resolved in this order: your `data/isin_map.json` overrides → [OpenFIGI](https://www.openfigi.com) (free bulk API) → yfinance search (slow fallback). The override file is only a correction layer: for ISINs OpenFIGI can't resolve, or ETFs where it picks the wrong listing (London instead of Xetra). Certificates and warrants are skipped, as are positions with zero shares.
 
-```cron
-0 8 * * 6 cd /path/to/portfolioAgent && /usr/bin/python3 agent.py >> output/agent.log 2>&1
+```bash
+cp data/isin_map.json.example data/isin_map.json   # only if you need overrides
 ```
 
-Replace `/path/to/portfolioAgent` with the full path to this directory and `/usr/bin/python3` with the output of `which python3`.
+> OpenFIGI allows 25 requests/min without a key and 250/min with a free one (`OPENFIGI_API_KEY` in `.env`). This only matters with a few hundred holdings.
 
-For weekly data collection without sending an email:
+### 8 — Target allocation (optional)
 
-```cron
-0 8 * * 6 cd /path/to/portfolioAgent && /usr/bin/python3 agent.py --data-only >> output/agent.log 2>&1
+```bash
+cp data/targets.json.example data/targets.json
+# edit groups, target_pct and tickers (Yahoo tickers as in portfolio.csv)
 ```
 
----
+The email then shows each group's drift. Groups more than `tolerance_pct` points off are highlighted and passed to Claude for the suggestions. Holdings in no group appear as *Unassigned*.
 
-## Troubleshooting
+### 9 — Paid in vs market gain (optional)
 
-| Problem | Fix |
-|---|---|
-| `data/portfolio.csv does not exist` | Make sure you're running the script from the `portfolioAgent` directory |
-| `No price history returned` | Check the ticker symbol on [finance.yahoo.com](https://finance.yahoo.com) |
-| Gmail authentication error | Re-generate the App Password; make sure 2-Step Verification is on |
-| NewsAPI returns no articles | Free tier has some query limits; try simplifying company names |
-| Claude API error | Check your `ANTHROPIC_API_KEY` and account credit balance |
+Export your account transactions from Finanzfluss as `data/finanzfluss_transactions.csv`, then:
 
-All runs are logged to `output/agent.log`.
+```bash
+python import_cashflows.py --input data/finanzfluss_transactions.csv
+```
+
+This writes `data/cashflows.csv`, which holds only daily totals: money invested (buys minus sells), dividends and interest, and the number of one-off orders. Private spending, counterparties and transfers are dropped. Upload `cashflows.csv` (never the raw export) to the private data repo.
+
+With it, the masthead splits the value change into paid in vs market, and shows a **Total** return: today's value minus everything ever paid in, including realised gains of sold positions. This assumes every purchase ran through that one account. Holdings moved in from another broker would count as gains.
+
+### 10 — Interactive dashboard (optional)
+
+```bash
+python dashboard.py --open
+```
+
+This writes `output/dashboard.html`, a single file that loads Plotly from a CDN. It fetches prices only and takes about half a minute.
+
+- **Your actual record**: paid in vs value, total gain, money-weighted return p.a. (XIRR) and the same deposits in the MSCI World or S&P 500, from `cashflows.csv` and `history.csv`. Put caveats about your own data in an optional `data/dashboard_note.txt`; they're shown under the tiles
+- **Backtest of today's portfolio**: today's share counts held unchanged over up to 7 years against the iShares Core S&P 500 and MSCI World ETFs on Xetra, with drawdown, returns by period, monthly heatmap, risk table and rolling metrics. It shows how your current holdings behave, not your past performance
+- **Positions**: return, contribution, volatility, beta, risk share and momentum per holding
+- **Structure**: concentration, diversification ratio, fund costs, order fees, dividends, look-through sectors, regions and currencies, weight vs risk share, correlation heatmap
+- **Simulations**: stress tests (Covid 2020, 2022 rates, 2024 yen carry, 2025 tariffs), a what-if re-weighting tool and a Monte Carlo projection
+- **Recommendation track record**: every call in `recommendations.csv` against the MSCI World since the day it was made, with hit rates per action
+
+The file contains your holdings and euro amounts. Keep it local, or host it only behind a login.
 
 ---
 
 ## How it works
 
 ```
-data/portfolio.csv
-     │
-     ▼
-yfinance ──→ live prices + weekly/monthly/YTD changes, all in EUR (daily FX)
-     │
-     ├──→ S&P 500 / Nasdaq / MSCI World benchmarks, also in EUR
-     ├──→ earnings + ex-dividend dates for the next 14 days
-     │
-NewsAPI ──→ articles → Haiku relevance filter (0–2 score) → top 10 relevant + world digest
-     │
-     ▼
-Claude (claude-sonnet-5, override with CLAUDE_MODEL)
-  ├── Portfolio Performance Summary
-  ├── Benchmark Comparison
-  ├── News & Market Context
-  └── Actionable Suggestions
-     │
-     ▼
-HTML email → Gmail SMTP → your inbox
+data/portfolio.csv ─┐
+data/cashflows.csv ─┤
+                    ▼
+yfinance ──→ prices, weekly/monthly/YTD changes, benchmarks; everything in EUR via daily FX
+         ──→ earnings and ex-dividend dates for the next 14 days
+NewsAPI  ──→ articles → Claude Haiku relevance filter → portfolio news + world digest
+                    │
+                    ▼
+Claude (claude-sonnet-5 by default)
+  ├── Portfolio performance
+  ├── Benchmark comparison
+  ├── News & market context
+  └── Actionable suggestions ──→ recommendations.csv / conviction.json
+                    │
+                    ▼
+HTML email ──→ Gmail SMTP ──→ your inbox
 ```
 
-The email also includes, when there is data for them: **Allocation vs Target** (see step 8), **Coming Up** (earnings and ex-dividend dates), and a **Track Record** of earlier recommendations — ADD counts as a hit when the price rose since, TRIM/EXIT when it fell.
+- **Deposit-free history.** Each `history.csv` row chains the EUR price return of your current holdings since the previous trading day. Money paid in or taken out never shows up as performance. The chart appears once four indexed rows exist.
+- **Recommendation memory.** Each report reads the latest advice per name (`conviction.json`) so Claude can follow up on earlier calls, and the email's track record checks whether each call moved the right way. Every call is also appended to `recommendations.csv`; the dashboard scores those against the MSCI World.
+- **Warnings.** A banner under the masthead flags a holdings or cash-flow export older than 30 days, and holdings whose ISIN couldn't be mapped.
 
-A red banner under the masthead warns when the holdings export is more than 30 days old, or when the import left out holdings whose ISIN could not be mapped to a ticker (they are listed in the notes at the end).
+### What stays private
 
-The history chart compares a deposit-free portfolio index with the S&P 500 in EUR. Each weekly run chains the price return of your current holdings since the previous run, so money you pay in or take out never shows up as performance. The chart appears once four weekly data points with the index exist.
-
-
+| Where | What |
+|---|---|
+| This (public) repo | Code, `*.example` templates and the synthetic demo in `docs/demo/` |
+| Private data repo | Holdings export, `history.csv`, `conviction.json`, `recommendations.csv`, `cashflows.csv`, `isin_map.json`, `targets.json` |
+| Your machine only | `.env`, the raw transactions export, `output/` (log, preview, dashboard) |
 
 ---
 
-## 7 — Update your holdings (Finanzfluss users)
+## Demo data and screenshots
 
-If you track your portfolio in [Finanzfluss](https://finanzfluss.de), you can use the included import script to keep `data/portfolio.csv` up to date.
-
-### Export from Finanzfluss
-
-1. Open Finanzfluss → **Portfolio** → **Depot**
-2. Click **Export** → save the CSV as `data/finanzfluss_export.csv`
-
-### Run the import
+`PORTFOLIO_DATA_DIR` and `PORTFOLIO_OUTPUT_DIR` point the agent at other folders. The README screenshots are rebuilt from the demo portfolio like this:
 
 ```bash
-python import_portfolio.py --input data/finanzfluss_export.csv
+python tools/make_demo_data.py                     # regenerate docs/demo/ from current prices
+export PORTFOLIO_DATA_DIR=docs/demo PORTFOLIO_OUTPUT_DIR=output/demo
+python agent.py --force --preview                  # one Claude call, nothing sent or saved
+python dashboard.py
+python tools/readme_screenshots.py                 # needs: pip install playwright && playwright install chromium
 ```
-
-The script resolves ISINs to Yahoo Finance tickers automatically, in this order: your `data/isin_map.json` overrides → [OpenFIGI](https://www.openfigi.com) (free bulk API) → yfinance search (slow fallback). **`isin_map.json` is optional** — most holdings resolve automatically via OpenFIGI without it. It's only needed for Finanzfluss imports, and only as a correction layer for the exceptions: ISINs OpenFIGI can't resolve, or ETFs where it picks the wrong exchange listing (e.g. London instead of Xetra). If you edit `portfolio.csv` manually instead (step 4), you'll never need this file at all.
-
-If you hit one of those exceptions, add an override:
-
-```bash
-cp data/isin_map.json.example data/isin_map.json
-# then edit data/isin_map.json and add your ISINs
-```
-
-> **Rate limits:** OpenFIGI allows 25 requests/min without a key, 250/min with one. With more than a couple hundred holdings you may hit the free limit — if so, get a free key at [openfigi.com](https://www.openfigi.com) and add `OPENFIGI_API_KEY=...` to your `.env`. Not needed otherwise.
-
-> **Note:** everything in `data/` except the `*.example` templates is in `.gitignore` — your holdings stay private.
 
 ---
 
-## 8 — Target allocation (optional)
+## Project layout
 
-Set target weights for groups of holdings and the report shows how far each group has drifted:
+| Path | Purpose |
+|---|---|
+| `agent.py` | CLI: schedule check, orchestration, Gmail send |
+| `market.py` | Portfolio load, FX, prices, history, charts, send cadence |
+| `metrics.py` | Sharpe, beta, momentum, look-through exposure |
+| `news.py` | NewsAPI and relevance filter |
+| `claude_report.py` | Claude analysis, headline, recommendation memory |
+| `email_html.py`, `theme.py` | HTML email and shared colours |
+| `dashboard.py`, `analytics.py`, `templates/dashboard.html` | Interactive dashboard |
+| `import_portfolio.py`, `import_cashflows.py` | Finanzfluss imports |
+| `tools/` | Demo data and screenshot scripts |
+| `tests/` | `python -m pytest` |
 
-```bash
-cp data/targets.json.example data/targets.json
-# then edit groups, target_pct and tickers (Yahoo tickers as in data/portfolio.csv)
-```
+## Troubleshooting
 
-Holdings in no group are shown as *Unassigned*. Groups that drift by more than `tolerance_pct` percentage points are highlighted and fed to Claude for the actionable suggestions. `targets.json` is gitignored; for GitHub Actions, upload it to your private data repo next to `isin_map.json`.
+| Problem | Fix |
+|---|---|
+| `data/portfolio.csv does not exist` | Run from the project directory |
+| `No price history returned` | Check the ticker on [finance.yahoo.com](https://finance.yahoo.com) |
+| Gmail authentication error | Re-create the App Password; 2-Step Verification must be on |
+| NewsAPI returns no articles | The free tier has query limits; try simpler company names |
+| Claude API error | Check `ANTHROPIC_API_KEY` and your credit balance |
+| History chart missing | It needs four indexed rows in `history.csv`, i.e. four trading days of snapshots |
 
----
-
-## 9 — Paid in vs market gain (optional)
-
-The masthead can split the value change into money you paid in and actual market gain. Export your account transactions from Finanzfluss as `data/finanzfluss_transactions.csv`, then:
-
-```bash
-python import_cashflows.py --input data/finanzfluss_transactions.csv
-```
-
-This writes `data/cashflows.csv` with only daily totals of money invested (buys minus sells), dividends/interest and the number of one-off orders (for the dashboard's order-fees tile; savings plans are free and not counted) — private spending, counterparties and transfers are dropped. Upload `cashflows.csv` (never the raw export) to your private data repo for GitHub Actions. The split runs from the first history entry of the current year, and the email warns when the cash-flow data is more than 30 days old. Both files are gitignored.
-
-The same data drives the **Total** figure in the masthead: current value minus everything paid in since the first booking, so it includes realised gains and losses of sold positions. This only holds if every purchase ran through that one cash account and the export covers its full history — positions bought through another broker or moved in by a securities transfer (Depotübertrag) would show up as gains. Without `cashflows.csv` the Total figure is simply left out.
-
-
-## 10 — Interactive dashboard (optional)
-
-Next to the email, you can build a performance dashboard for your browser:
-
-```bash
-python dashboard.py --open
-```
-
-This writes `output/dashboard.html`, a single file you open locally (it loads Plotly from a CDN, so it needs an internet connection to display). It fetches prices only — no Claude, no news, no email — and takes about half a minute. Sections:
-
-- **Your actual record** — net paid in vs value, total gain and your money-weighted return p.a. (XIRR), from `cashflows.csv` and `history.csv` (section 9); what the same deposits would be worth in the MSCI World or S&P 500; money paid in and income per month.
-- **Backtest of today's portfolio** — today's share counts held unchanged over up to 7 years against the S&P 500 and MSCI World (as the iShares Core ETFs SXR8 and EUNL on Xetra: in EUR, net of fund fees): range buttons, drawdown, returns by period, monthly heatmap, risk table (Sharpe, Sortino, beta, tracking error, capture ratios, VaR…) and rolling metrics. This shows how your current holdings behave, not your actual past performance.
-- **Positions** — sortable table with return and contribution per period, volatility, beta, risk share and momentum.
-- **Structure** — concentration, diversification ratio, fund costs (TER), order fees (1 € per one-off order, already inside the money paid in) and trailing dividends, sectors, regions, currencies looked through to the underlying assets, weight vs risk share and a correlation heatmap.
-- **Simulations** — stress tests (today's holdings through Covid 2020, the 2022 rate shock, the 2024 yen carry unwind and the 2025 tariff shock), a what-if tool to re-weight positions, and a Monte Carlo projection with sliders for saving, years, return and volatility.
-- **Recommendation track record** — every recommendation in `recommendations.csv` (append-only log written by each report; falls back to `conviction.json`) against the MSCI World since the day it was made, with hit rates per action.
-
-The file contains your holdings and euro amounts. Keep it local, or host it only behind a login.
+All runs are logged to `output/agent.log`.

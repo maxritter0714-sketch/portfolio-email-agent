@@ -19,8 +19,9 @@ Stack: Python · yfinance · NewsAPI · Anthropic Claude · Gmail SMTP
 | `theme.py` | Shared colours for charts and email |
 | `import_portfolio.py` | Converts Finanzfluss export CSV → `data/portfolio.csv` |
 | `import_cashflows.py` | Reduces the Finanzfluss transactions export → daily `data/cashflows.csv` (only invested, dividends and one-off order count; private spending stays local) |
-| `paths.py` | `DATA_DIR` (`data/`) and `OUTPUT_DIR` (`output/`) — all file locations hang off these |
-| `data/` | All personal files, gitignored except `*.example`: `finanzfluss_export.csv`, `portfolio.csv`, `history.csv`, `conviction.json` (latest advice per name, for the prompt), `recommendations.csv` (append-only log of every recommendation, for the dashboard), `cashflows.csv`, `isin_map.json`, `targets.json` |
+| `paths.py` | `DATA_DIR` (`data/`) and `OUTPUT_DIR` (`output/`) — all file locations hang off these; override with `PORTFOLIO_DATA_DIR` / `PORTFOLIO_OUTPUT_DIR` |
+| `tools/` | `make_demo_data.py` (synthetic portfolio in `docs/demo/`) and `readme_screenshots.py` (Playwright → `docs/images/`) — README screenshots never use real data |
+| `data/` | All personal files, gitignored except `*.example`: `finanzfluss_export.csv`, `portfolio.csv`, `history.csv`, `conviction.json` (latest advice per name, for the prompt), `recommendations.csv` (append-only log of every recommendation, for the dashboard), `cashflows.csv`, `isin_map.json`, `targets.json`, `dashboard_note.txt` (optional caveat shown on the dashboard) |
 | `output/` | `agent.log`, `preview.html`, `dashboard.html` (gitignored) |
 | `.env` | API keys and Gmail credentials (never commit) |
 | `requirements.txt` | Python dependencies |

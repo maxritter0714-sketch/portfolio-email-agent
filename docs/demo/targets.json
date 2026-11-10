@@ -1,0 +1,29 @@
+{
+  "tolerance_pct": 5,
+  "groups": [
+    {
+      "name": "Core ETFs",
+      "target_pct": 60,
+      "tickers": [
+        "SXR8.DE",
+        "EUNL.DE",
+        "IS3N.DE"
+      ]
+    },
+    {
+      "name": "Single stocks",
+      "target_pct": 40,
+      "tickers": [
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "AMZN",
+        "GOOGL",
+        "ASML.AS",
+        "SAP.DE",
+        "ALV.DE",
+        "TSM"
+      ]
+    }
+  ]
+}

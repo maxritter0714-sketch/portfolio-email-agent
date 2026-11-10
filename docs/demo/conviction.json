@@ -1,0 +1,44 @@
+{
+  "NVDA": {
+    "action": "TRIM",
+    "report": 48,
+    "date": "2026-10-31",
+    "price_eur": 183.0
+  },
+  "IS3N.DE": {
+    "action": "ADD",
+    "report": 38,
+    "date": "2026-06-13",
+    "price_eur": 47.89
+  },
+  "TSM": {
+    "action": "TRIM",
+    "report": 40,
+    "date": "2026-07-11",
+    "price_eur": 378.67
+  },
+  "ALV.DE": {
+    "action": "ADD",
+    "report": 42,
+    "date": "2026-08-08",
+    "price_eur": 433.5
+  },
+  "AAPL": {
+    "action": "TRIM",
+    "report": 44,
+    "date": "2026-09-05",
+    "price_eur": 275.16
+  },
+  "SAP.DE": {
+    "action": "EXIT",
+    "report": 46,
+    "date": "2026-10-03",
+    "price_eur": 183.92
+  },
+  "EUNL.DE": {
+    "action": "ADD",
+    "report": 47,
+    "date": "2026-10-17",
+    "price_eur": 130.54
+  }
+}
