@@ -123,9 +123,9 @@ The cleanest setup — runs in the cloud, no local machine required, secrets sto
    - `DATA_REPO_TOKEN` — the PAT from step 2
    - `ANTHROPIC_API_KEY`, `NEWS_API_KEY`, `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `RECIPIENT_EMAIL`
 4. If your private data repo is not `maxritter0714-sketch/portfolio-agent-data`, add an Actions **variable** `PORTFOLIO_DATA_REPO` set to `owner/name`.
-5. The included `.github/workflows/report.yml` runs every Saturday at 6am UTC automatically
+5. The included `.github/workflows/report.yml` runs every Saturday at 6am UTC automatically, and `.github/workflows/snapshot.yml` records a data point every weekday at 22:30 UTC (after the New York close)
 
-The workflow collects a weekly data point on every Saturday and sends the full email report every other Saturday. `history.csv`, `conviction.json` and `recommendations.csv` are pushed back to the private repo after each run so they persist between executions.
+The snapshot job writes one `history.csv` row per trading day (prices only, no Claude, no email); the report sends the full email every other Saturday. Rows are dated by the trading day their prices come from, so the Saturday run reuses Friday's row instead of adding a duplicate. `history.csv`, `conviction.json` and `recommendations.csv` are pushed back to the private repo after each run so they persist between executions.
 
 To trigger a test run: **Actions → Portfolio Report → Run workflow → tick Force full report**.
 

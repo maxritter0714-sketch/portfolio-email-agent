@@ -10,6 +10,10 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: data-repo  # shared with the daily snapshot, so the two never push at once
+  cancel-in-progress: false
+
 jobs:
   report:
     runs-on: ubuntu-latest
@@ -55,7 +59,7 @@ jobs:
           OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
         run: python import_portfolio.py --input data/finanzfluss_export.csv --allow-missing
 
-      - name: Collect weekly data point
+      - name: Collect data point (fills Friday's row if the daily snapshot missed it)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python agent.py --data-only

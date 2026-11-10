@@ -934,6 +934,42 @@ def test_history_chart_skips_rows_without_index(tmp_path, monkeypatch):
     assert market.generate_history_chart() is None
 
 
+def test_history_chart_handles_a_year_of_daily_rows(tmp_path, monkeypatch):
+    hist = tmp_path / "history.csv"
+    days = pd.bdate_range("2025-11-10", periods=250)
+    _write_history(hist, [
+        {"date": d.date().isoformat(), "total_value_eur": 1000, "sp500_close": 5000,
+         "source": "scheduled", "port_index": 100 + i * 0.1, "sp500_eur": 4500 + i}
+        for i, d in enumerate(days)
+    ])
+    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
+    assert market.generate_history_chart() is not None
+
+
+# ── Daily snapshot: rows dated by trading day ─────────────────────────────────
+
+def test_last_trading_day_uses_last_close_not_run_date():
+    friday = pd.to_datetime(["2026-11-12", "2026-11-13"]).tz_localize("America/New_York")
+    close = pd.Series([7400.0, 7410.0], index=friday)
+    assert market.last_trading_day(close, fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 13)
+
+
+def test_last_trading_day_falls_back_without_prices():
+    assert market.last_trading_day(None, fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 14)
+    assert market.last_trading_day(pd.Series(dtype=float), fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 14)
+
+
+def test_append_history_saturday_run_skips_fridays_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setattr(market, "_HISTORY_PATH", tmp_path / "history.csv")
+    monkeypatch.setattr(market, "_hist_cache", {"^GSPC": pd.Series([7410.0])})
+    friday = real_date(2026, 11, 13)
+    summary = {"total_value_eur": 32000.0}
+    assert market.append_history(summary, 49, port_index=101.0, sp500_eur=6600.0, day=friday) is True
+    assert market.append_history(summary, 49, port_index=101.0, sp500_eur=6600.0, day=friday) is False
+    rows = market._read_history()
+    assert [(r["date"], r["source"]) for r in rows] == [("2026-11-13", "scheduled")]
+
+
 # ── Upcoming events ───────────────────────────────────────────────────────────
 
 def test_events_from_calendar_keeps_only_window():

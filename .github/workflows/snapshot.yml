@@ -1,0 +1,68 @@
+name: Daily Snapshot
+
+# One history.csv row per trading day: prices only, no Claude, no email.
+# 22:30 UTC is after the New York close in summer and winter time, so every
+# market in the portfolio has closed. The row is dated by the S&P 500's last
+# session, so the Saturday report run finds Friday's row and skips it.
+on:
+  schedule:
+    - cron: '30 22 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: data-repo  # shared with the report, so the two never push at once
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout portfolio agent
+        uses: actions/checkout@v7
+
+      - name: Checkout data repo
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.PORTFOLIO_DATA_REPO || 'maxritter0714-sketch/portfolio-agent-data' }}
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          path: _data
+
+      - name: Copy data files into data/
+        run: |
+          if [ -f _data/finanzfluss_export.csv ]; then
+            cp _data/finanzfluss_export.csv data/
+          else
+            cp _data/portfolio.csv data/
+          fi
+          for f in history.csv isin_map.json; do
+            cp "_data/$f" data/ 2>/dev/null || true
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt --quiet
+
+      - name: Convert Finanzfluss export to portfolio.csv
+        if: ${{ hashFiles('data/finanzfluss_export.csv') != '' }}
+        env:
+          OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
+        run: python import_portfolio.py --input data/finanzfluss_export.csv --allow-missing
+
+      - name: Record today's data point
+        run: python agent.py --data-only
+
+      - name: Push history back to data repo
+        run: |
+          cp data/history.csv _data/
+          cd _data
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add history.csv
+          git diff --cached --quiet || git commit -m "chore: daily snapshot $(date -u +%Y-%m-%d)"
+          git push

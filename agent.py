@@ -38,6 +38,7 @@ from paths import OUTPUT_DIR
 from market import (
     _hist_cache,
     append_history,
+    last_trading_day,
     compute_allocation_drift,
     fetch_benchmarks,
     fetch_portfolio_data,
@@ -147,17 +148,18 @@ def inline_chart_images(html: str, chart_files: dict[str, str]) -> str:
 
 # ── History ───────────────────────────────────────────────────────────────────
 def record_history(positions: list[dict], summary: dict, fx_rates: dict[str, float]) -> None:
-    """Append today's data point, including the deposit-free portfolio index."""
+    """Append the latest trading day's data point, including the deposit-free portfolio index."""
     source = "scheduled" if os.environ.get("GITHUB_ACTIONS") == "true" else "manual"
-    port_index = next_portfolio_index(positions, fx_rates)
     sp500 = _hist_cache.get("^GSPC")
+    day = last_trading_day(sp500)
+    port_index = next_portfolio_index(positions, fx_rates, today=day)
     sp500_eur = None
     if sp500 is not None and not sp500.empty:
         sp500_eur = float(sp500.iloc[-1]) * fx_rates.get("USD", 0.0) or None
-    append_history(summary, issue_number(), source=source,
-                   port_index=port_index, sp500_eur=sp500_eur)
-    log.info("History updated — total value EUR %.0f, index %.2f (source=%s)",
-             summary["total_value_eur"], port_index, source)
+    if append_history(summary, issue_number(), source=source,
+                      port_index=port_index, sp500_eur=sp500_eur, day=day):
+        log.info("History updated for %s — total value EUR %.0f, index %.2f (source=%s)",
+                 day, summary["total_value_eur"], port_index, source)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

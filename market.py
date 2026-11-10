@@ -13,7 +13,9 @@ from typing import Any
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -619,6 +621,7 @@ _HISTORY_COLS = (
     "port_index", "sp500_eur",
 )
 _HISTORY_CHART_MIN_ROWS = 4
+_HISTORY_CHART_MARKER_MAX = 30
 
 
 def _is_float(value: object | None) -> bool:
@@ -692,9 +695,14 @@ def append_history(
     source: str = "scheduled",
     port_index: float | None = None,
     sp500_eur: float | None = None,
-) -> None:
-    """Append one row to history.csv per (date, source) pair."""
-    today_str = date.today().isoformat()
+    day: date | None = None,
+) -> bool:
+    """Append one row to history.csv per (date, source) pair; returns whether a row was written.
+
+    `day` is the trading day the prices belong to (default: today), so a
+    weekend run after the Friday snapshot finds Friday's row and skips.
+    """
+    today_str = (day or date.today()).isoformat()
     now_str = dt.now().isoformat(timespec="seconds")
     existing: list[dict] = []
 
@@ -719,7 +727,7 @@ def append_history(
 
         if any(r.get("date") == today_str and r.get("source", "scheduled") == source for r in existing):
             log.info("History: %s entry for %s already exists — skipping.", source, today_str)
-            return
+            return False
 
     sp500_series = _hist_cache.get("^GSPC")
     if sp500_series is None or sp500_series.empty:
@@ -744,6 +752,21 @@ def append_history(
         if write_header:
             writer.writeheader()
         writer.writerow(row)
+    return True
+
+
+def last_trading_day(close: pd.Series | None, fallback: date | None = None) -> date:
+    """Date of the last close in `close` (the S&P 500), else `fallback` or today.
+
+    History rows are dated by the trading day their prices come from, not the
+    run date: the Saturday run then reuses Friday's date, and a US holiday
+    resolves to the previous session.
+    """
+    fallback = fallback or date.today()
+    if close is None or close.empty:
+        return fallback
+    last = pd.Timestamp(close.index[-1]).date()
+    return min(last, fallback)
 
 
 def generate_history_chart() -> str | None:
@@ -763,7 +786,7 @@ def generate_history_chart() -> str | None:
     if len(rows) < _HISTORY_CHART_MIN_ROWS:
         return None
 
-    labels   = [r["date"] for r in rows]
+    dates    = [pd.Timestamp(r["date"]) for r in rows]
     port_raw = [float(r["port_index"]) for r in rows]
     sp_raw   = [float(r["sp500_eur"]) for r in rows]
 
@@ -772,17 +795,20 @@ def generate_history_chart() -> str | None:
     port_idx  = [v / base_port * 100 for v in port_raw]
     sp_idx    = [v / base_sp   * 100 for v in sp_raw]
 
+    # Daily rows since the snapshot job: markers only while the series is short.
+    few = len(rows) < _HISTORY_CHART_MARKER_MAX
     fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(range(len(labels)), port_idx, color=DARK_GOLD, linewidth=2,
-            label="Portfolio", marker="o", markersize=4)
-    ax.plot(range(len(labels)), sp_idx, color=NAVY, linewidth=1.5,
-            linestyle="--", label="S&P 500 (EUR)", marker="o", markersize=3)
+    ax.plot(dates, port_idx, color=DARK_GOLD, linewidth=2,
+            label="Portfolio", marker="o" if few else None, markersize=4)
+    ax.plot(dates, sp_idx, color=NAVY, linewidth=1.5,
+            linestyle="--", label="S&P 500 (EUR)", marker="o" if few else None, markersize=3)
     ax.axhline(100, color=TEXT_SECONDARY, linewidth=0.5, linestyle=":")
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(
-        [pd.Timestamp(r["date"]).strftime("%d %b '%y").lstrip("0") for r in rows],
-        fontsize=7, color=TEXT_PRIMARY, fontfamily="serif", rotation=45, ha="right",
-    )
+    locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(
+        FuncFormatter(lambda x, _: mdates.num2date(x).strftime("%d %b '%y").lstrip("0")))
+    plt.setp(ax.get_xticklabels(), fontsize=7, color=TEXT_PRIMARY, fontfamily="serif",
+             rotation=45, ha="right")
     ax.tick_params(axis="y", labelsize=8, colors=TEXT_PRIMARY)
     ax.set_title("Price return in EUR, deposits excluded, indexed to 100 at start", fontsize=8,
                  color=TEXT_SECONDARY, fontfamily="serif", pad=6)
