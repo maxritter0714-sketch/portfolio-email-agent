@@ -257,8 +257,8 @@ function counterTile() {
     eur(edge, true), `World would be ${eur(W.value)} · ${pct(W.xirr)} p.a.`, tone(edge));
 }
 el("real-note").textContent =
-  "From your cash-flow export (Trade Republic account only) and the value snapshots in history.csv. " +
-  "Value points before October 2026 were computed on stale holdings and are approximate.";
+  "From your cash-flow export (cashflows.csv) and the value snapshots in history.csv." +
+  (DATA.real_note ? " " + DATA.real_note : "");
 
 (function realChart() {
   if (!R.flows.length) { el("chart-real").style.display = "none"; el("real-buttons").style.display = "none"; return; }
@@ -778,7 +778,7 @@ buttons("position-buttons", ["1M", "3M", "YTD", "1Y"].map(k => [k, `Return & con
         hovertemplate: "%{y:,.0f} €<extra>Paid in</extra>" },
       ...(target ? [{ x: [x[0], x.at(-1)], y: [target, target], type: "scatter", mode: "lines", name: "Target",
         line: { color: T.burgundy, width: 1, dash: "dash" }, hoverinfo: "skip" }] : []),
-    ], baseLayout({ yaxis: { ticksuffix: " €", tickformat: ",.0f", gridcolor: "rgba(26,26,26,0.07)" } }), CONFIG);
+    ], baseLayout({ yaxis: { ticksuffix: " €", tickformat: ",.0f", automargin: true, gridcolor: "rgba(26,26,26,0.07)" } }), CONFIG);
   }
 
   let pending = false;
@@ -893,7 +893,7 @@ el("footer").innerHTML = `
   <p><b>Differences from the email.</b> The email's risk figures use constant weights, daily returns over one year and the
   S&amp;P 500 price index, so Sharpe, beta etc. differ from the figures here.</p>
   <p><b>Your return p.a.</b> XIRR on every buy, sale and income booking in cashflows.csv, closed out at today's value.
-  Covers the Trade Republic account only and assumes no bookings after the export date.</p>`;
+  Covers only the accounts in the export and assumes no bookings after the export date.</p>`;
 </script>
 </body>
 </html>

@@ -43,7 +43,7 @@ from market import (
     sector_exposure,
 )
 from metrics import compute_momentum_scores, risk_free_rate
-from paths import OUTPUT_DIR
+from paths import DATA_DIR, OUTPUT_DIR
 from theme import (
     BG_CHART, BG_CREAM, BURGUNDY, CHARCOAL, DARK_GOLD, GOLD, NAVY, SAGE,
     TEXT_PRIMARY, TEXT_SECONDARY, _PALETTE,
@@ -73,6 +73,8 @@ STRESS_SCENARIOS = (
 WHATIF_PERIOD = "3Y"
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "dashboard.html"
 OUTPUT_PATH = OUTPUT_DIR / "dashboard.html"
+# Optional free text shown under "Your actual record" (caveats about your own data).
+NOTE_PATH = DATA_DIR / "dashboard_note.txt"
 
 
 # ── Data fetching ────────────────────────────────────────────────────────────
@@ -299,6 +301,7 @@ def build_payload(
         risk_free=risk_free,
         benchmarks={k: label for k, (_, label, _) in BENCHMARKS.items()},
         real=_real_record(total_value, cashflows, history, bench_prices, today),
+        real_note=(NOTE_PATH.read_text(encoding="utf-8").strip() if NOTE_PATH.exists() else ""),
         series=dict(
             dates=[d.date().isoformat() for d in port_ret.index],
             portfolio=indices["portfolio"].tolist(),
