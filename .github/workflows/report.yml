@@ -35,7 +35,7 @@ jobs:
             holdings=portfolio.csv
           fi
           cp "_data/$holdings" data/
-          for f in history.csv conviction.json isin_map.json targets.json cashflows.csv; do
+          for f in history.csv conviction.json recommendations.csv isin_map.json targets.json cashflows.csv; do
             cp "_data/$f" data/ 2>/dev/null || true
           done
           echo "PORTFOLIO_AS_OF=$(git -C _data log -1 --format=%cs -- "$holdings")" >> "$GITHUB_ENV"
@@ -82,9 +82,11 @@ jobs:
         run: |
           cp data/history.csv _data/ 2>/dev/null || true
           cp data/conviction.json _data/ 2>/dev/null || true
+          cp data/recommendations.csv _data/ 2>/dev/null || true
           cd _data
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add history.csv conviction.json
+          [ -f recommendations.csv ] && git add recommendations.csv
           git diff --cached --quiet || git commit -m "chore: update portfolio data $(date -u +%Y-%m-%d)"
           git push

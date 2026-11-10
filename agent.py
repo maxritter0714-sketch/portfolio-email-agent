@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 
 from claude_report import (
     _assert_analysis_complete,
+    append_recommendations,
     call_claude,
     call_claude_headline,
     conviction_scorecard,
@@ -298,9 +299,10 @@ def main() -> None:
         actionable_items = parse_actionable(actionable_raw)
         scorecard = conviction_scorecard(conviction_prior, positions, ref_prices)
         if args.preview:
-            log.info("Preview — conviction.json left unchanged")
+            log.info("Preview — conviction.json and recommendations.csv left unchanged")
         else:
             save_conviction(conviction, actionable_items, positions, current_issue)
+            append_recommendations(actionable_items, positions, current_issue)
 
         log.info("Calling Claude for headline…")
         try:

@@ -11,6 +11,8 @@ import market
 from claude_report import (
     _assert_analysis_complete,
     _value_vs_jan_line,
+    append_recommendations,
+    load_recommendations,
     match_action_ticker,
     parse_actionable,
     save_conviction,
@@ -290,6 +292,37 @@ def test_save_conviction_writes_name_match(tmp_path, monkeypatch):
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["NVDA"]["action"] == "TRIM"
     assert saved["NVDA"]["report"] == 12
+
+
+# ── Recommendation log ────────────────────────────────────────────────────────
+
+_ITEMS = [
+    {"action": "TRIM", "title": "Reduce Nvidia, keep core", "detail": "Too big."},
+    {"action": "RESEARCH", "title": "Rebalance towards ETFs", "detail": ""},
+]
+
+
+def test_append_recommendations_creates_log_with_header_and_unmatched_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr("claude_report._RECOMMENDATIONS_PATH", tmp_path / "recommendations.csv")
+    assert append_recommendations(_ITEMS, [_POS_NVDA], issue_num=12) == 2
+    rows = load_recommendations()
+    assert [(r["ticker"], r["action"], r["report"]) for r in rows] == [
+        ("NVDA", "TRIM", "12"), ("", "RESEARCH", "12")]
+    assert rows[0]["title"] == "Reduce Nvidia, keep core"  # comma survives CSV quoting
+    assert float(rows[0]["price_eur"]) == pytest.approx(_POS_NVDA["price_eur"])
+
+
+def test_append_recommendations_appends_new_issue_and_skips_rerun(tmp_path, monkeypatch):
+    monkeypatch.setattr("claude_report._RECOMMENDATIONS_PATH", tmp_path / "recommendations.csv")
+    append_recommendations(_ITEMS, [_POS_NVDA], issue_num=12)
+    assert append_recommendations(_ITEMS, [_POS_NVDA], issue_num=12) == 0
+    assert append_recommendations(_ITEMS[:1], [_POS_NVDA], issue_num=13) == 1
+    assert [r["report"] for r in load_recommendations()] == ["12", "12", "13"]
+
+
+def test_load_recommendations_empty_without_log(tmp_path, monkeypatch):
+    monkeypatch.setattr("claude_report._RECOMMENDATIONS_PATH", tmp_path / "missing.csv")
+    assert load_recommendations() == []
 
 
 # ── _markdown_to_html ─────────────────────────────────────────────────────────

@@ -117,7 +117,7 @@ You should receive an email within about 30 seconds. Check `output/agent.log` if
 
 The cleanest setup — runs in the cloud, no local machine required, secrets stored encrypted.
 
-1. Create a private GitHub repo (e.g. `portfolio-agent-data`) and upload your holdings there: either `finanzfluss_export.csv` (converted on every run) or a hand-kept `portfolio.csv` (used as is). `history.csv` and `conviction.json` are created by the first run — only upload them if you already have them from local runs. If you use Finanzfluss import overrides, also upload your `isin_map.json` (see [step 7](#7--update-your-holdings-finanzfluss-users)) — otherwise it won't be picked up by cloud runs
+1. Create a private GitHub repo (e.g. `portfolio-agent-data`) and upload your holdings there: either `finanzfluss_export.csv` (converted on every run) or a hand-kept `portfolio.csv` (used as is). `history.csv`, `conviction.json` and `recommendations.csv` are created by the first run — only upload them if you already have them from local runs. If you use Finanzfluss import overrides, also upload your `isin_map.json` (see [step 7](#7--update-your-holdings-finanzfluss-users)) — otherwise it won't be picked up by cloud runs
 2. Create a fine-grained Personal Access Token scoped to that private repo with **Contents: Read and write**
 3. Add secrets to your public repo under **Settings → Secrets and variables → Actions**:
    - `DATA_REPO_TOKEN` — the PAT from step 2
@@ -125,7 +125,7 @@ The cleanest setup — runs in the cloud, no local machine required, secrets sto
 4. If your private data repo is not `maxritter0714-sketch/portfolio-agent-data`, add an Actions **variable** `PORTFOLIO_DATA_REPO` set to `owner/name`.
 5. The included `.github/workflows/report.yml` runs every Saturday at 6am UTC automatically
 
-The workflow collects a weekly data point on every Saturday and sends the full email report every other Saturday. `history.csv` and `conviction.json` are pushed back to the private repo after each run so they persist between executions.
+The workflow collects a weekly data point on every Saturday and sends the full email report every other Saturday. `history.csv`, `conviction.json` and `recommendations.csv` are pushed back to the private repo after each run so they persist between executions.
 
 To trigger a test run: **Actions → Portfolio Report → Run workflow → tick Force full report**.
 
@@ -272,6 +272,6 @@ This writes `output/dashboard.html`, a single file you open locally (it loads Pl
 - **Positions** — sortable table with return and contribution per period, volatility, beta, risk share and momentum.
 - **Structure** — concentration, diversification ratio, fund costs (TER) and trailing dividends, sectors, regions, currencies looked through to the underlying assets, weight vs risk share and a correlation heatmap.
 - **Simulations** — stress tests (today's holdings through Covid 2020, the 2022 rate shock, the 2024 yen carry unwind and the 2025 tariff shock), a what-if tool to re-weight positions, and a Monte Carlo projection with sliders for saving, years, return and volatility.
-- **Recommendation track record** — each recommendation in `conviction.json` against the MSCI World since the day it was made.
+- **Recommendation track record** — every recommendation in `recommendations.csv` (append-only log written by each report; falls back to `conviction.json`) against the MSCI World since the day it was made, with hit rates per action.
 
 The file contains your holdings and euro amounts. Keep it local, or host it only behind a login.

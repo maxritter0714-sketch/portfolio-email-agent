@@ -1,6 +1,7 @@
 """Claude analysis, headline, actionable parsing, and conviction tracking."""
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import os
@@ -16,6 +17,10 @@ log = logging.getLogger(__name__)
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-5"
 _CONVICTION_MAX_AGE_DAYS = 182  # older recommendations are dropped
 _CONVICTION_PATH = DATA_DIR / "conviction.json"
+# Append-only log of every recommendation. conviction.json keeps only the
+# latest one per name for the prompt; this file keeps the full history.
+_RECOMMENDATIONS_PATH = DATA_DIR / "recommendations.csv"
+RECOMMENDATION_FIELDS = ["date", "report", "ticker", "action", "price_eur", "title"]
 
 
 def claude_model() -> str:
@@ -526,6 +531,49 @@ def save_conviction(
                 "price_eur": price_map.get(matched, 0.0),
             }
     _CONVICTION_PATH.write_text(json.dumps(conviction, indent=2), encoding="utf-8")
+
+
+def load_recommendations() -> list[dict]:
+    """All logged recommendations, oldest first; empty if the log doesn't exist yet."""
+    if not _RECOMMENDATIONS_PATH.exists():
+        return []
+    with _RECOMMENDATIONS_PATH.open(newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
+
+
+def append_recommendations(
+    actionable_items: list[dict],
+    positions: list[dict],
+    issue_num: int,
+) -> int:
+    """Append this run's recommendations to the log; returns the number of rows written.
+
+    Rows are never changed or removed. A rerun of an issue that is already in
+    the log writes nothing, so `--force` reruns don't duplicate it. Items that
+    match no holding are kept with an empty ticker.
+    """
+    if any(r.get("report") == str(issue_num) for r in load_recommendations()):
+        log.info("Recommendations for issue #%d already logged — skipping", issue_num)
+        return 0
+    price_map = {p["ticker"]: p["price_eur"] for p in positions}
+    today = date.today().isoformat()
+    rows = []
+    for item in actionable_items:
+        ticker = match_action_ticker(item, positions) or ""
+        rows.append(dict(
+            date=today, report=issue_num, ticker=ticker, action=item["action"],
+            price_eur=price_map.get(ticker, ""), title=item.get("title", ""),
+        ))
+    if not rows:
+        return 0
+    new_file = not _RECOMMENDATIONS_PATH.exists()
+    with _RECOMMENDATIONS_PATH.open("a", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=RECOMMENDATION_FIELDS)
+        if new_file:
+            writer.writeheader()
+        writer.writerows(rows)
+    log.info("Logged %d recommendation(s) for issue #%d", len(rows), issue_num)
+    return len(rows)
 
 
 # ── Recommendation track record ───────────────────────────────────────────────

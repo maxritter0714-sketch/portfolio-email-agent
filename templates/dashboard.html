@@ -792,8 +792,8 @@ buttons("position-buttons", ["1M", "3M", "YTD", "1Y"].map(k => [k, `Return & con
   const recs = DATA.recommendations || [];
   el("recs-note").textContent =
     "Each name the email recommended, measured from the close on the day of the recommendation against the MSCI World over the same days. " +
-    "A hit means ADD beat the World, TRIM or EXIT lagged it. Only the latest recommendation per name is stored (conviction.json, kept about six months), " +
-    "so this is a short, recent sample, not a full history.";
+    "A hit means ADD beat the World, TRIM or EXIT lagged it. Every recommendation is listed (recommendations.csv); " +
+    "a name advised again in a later issue gets its own row, measured from that later date.";
   if (!recs.length) { el("recs-table").innerHTML = "<tr><td>No recommendations stored yet.</td></tr>"; return; }
   const judged = recs.filter(r => r.hit !== null);
   const hits = judged.filter(r => r.hit).length;
@@ -806,6 +806,12 @@ buttons("position-buttons", ["1M", "3M", "YTD", "1Y"].map(k => [k, `Return & con
       judged.length ? tone(hits / judged.length - 0.5) : ""),
     tile("<abbr title='Average return relative to the MSCI World in the direction of the advice: for TRIM and EXIT, a name lagging the World counts as a gain.'>Avg edge vs World</abbr>",
       pct(avgEdge), "in the advised direction", tone(avgEdge)),
+    ...Object.keys(DIRECTED).map(action => {
+      const rows = judged.filter(r => r.action === action);
+      const h = rows.filter(r => r.hit).length;
+      return tile(`${action} hit rate`, rows.length ? `${h} / ${rows.length}` : "–",
+        rows.length ? pct(h / rows.length, 0, false) : "none yet", rows.length ? tone(h / rows.length - 0.5) : "");
+    }),
   ].join("");
   const head = "<tr><th>Date</th><th>Issue</th><th>Ticker</th><th>Action</th><th>Since</th><th>MSCI World</th><th>Relative</th><th>Hit</th></tr>";
   el("recs-table").innerHTML = head + recs.map(r =>

@@ -419,14 +419,19 @@ def _close_on(prices: pd.Series, day: pd.Timestamp) -> float | None:
     return float(before.iloc[-1]) if not before.empty else None
 
 
-def recommendation_record(recs: dict[str, dict], prices: pd.DataFrame, bench: pd.Series) -> list[dict]:
-    """Return of each recommended name since the recommendation, against the benchmark.
+def recommendation_record(recs: list[dict], prices: pd.DataFrame, bench: pd.Series) -> list[dict]:
+    """Return of each recommendation since it was made, against the benchmark.
 
+    `recs` are rows of the recommendation log (`ticker`, `action`, `report`,
+    `date`); a name can appear several times. Rows without a ticker are skipped.
     A hit is judged on the return relative to the benchmark (`excess`), not the
     raw price, so a falling market doesn't make every TRIM look clever.
     """
     rows = []
-    for ticker, rec in recs.items():
+    for rec in recs:
+        ticker = rec.get("ticker") or ""
+        if not ticker:
+            continue
         day = pd.Timestamp(rec["date"])
         series = prices[ticker].dropna() if ticker in prices.columns else pd.Series(dtype=float)
         then, now = _close_on(series, day), (float(series.iloc[-1]) if not series.empty else None)
@@ -436,7 +441,9 @@ def recommendation_record(recs: dict[str, dict], prices: pd.DataFrame, bench: pd
         excess = ret - bench_ret if ret is not None and bench_ret is not None else None
         direction = _REC_DIRECTION.get(rec.get("action", ""))
         hit = None if direction is None or excess is None else (excess > 0) == (direction > 0)
-        rows.append(dict(ticker=ticker, action=rec.get("action", ""), report=rec.get("report"),
+        report = rec.get("report")
+        rows.append(dict(ticker=ticker, action=rec.get("action", ""),
+                         report=int(report) if str(report or "").isdigit() else None,
                          date=rec["date"], ret=ret, bench_ret=bench_ret, excess=excess, hit=hit))
     rows.sort(key=lambda r: (r["date"], r["ticker"]), reverse=True)
     return rows

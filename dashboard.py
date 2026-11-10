@@ -28,7 +28,7 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 import analytics as an
-from claude_report import load_conviction
+from claude_report import load_conviction, load_recommendations
 from market import (
     _read_history,
     _to_eur_close,
@@ -105,6 +105,14 @@ def _listing_currency(ticker: str) -> str:
 
 
 # ── Payload ──────────────────────────────────────────────────────────────────
+
+def _load_recs() -> list[dict]:
+    """Full recommendation log; falls back to conviction.json (latest per name) until the log exists."""
+    recs = load_recommendations()
+    if recs:
+        return recs
+    return [dict(rec, ticker=ticker) for ticker, rec in load_conviction().items()]
+
 
 def _series(s: pd.Series) -> dict:
     return dict(dates=[d.date().isoformat() for d in s.index], values=s.tolist())
@@ -208,7 +216,7 @@ def build_payload(
     history: list[dict],
     risk_free: float,
     today: date,
-    recs: dict[str, dict] | None = None,
+    recs: list[dict] | None = None,
     rec_prices: pd.DataFrame | None = None,
 ) -> dict:
     """`rec_prices` adds closes for recommended names no longer held (track record only)."""
@@ -315,7 +323,7 @@ def build_payload(
         ),
         costs=_costs(positions, total_value),
         recommendations=an.recommendation_record(
-            recs or {}, prices if rec_prices is None else prices.join(rec_prices, how="outer"),
+            recs or [], prices if rec_prices is None else prices.join(rec_prices, how="outer"),
             bench_prices["world"]),
         correlation=dict(tickers=ordered, matrix=corr.round(3).to_numpy().tolist()),
         stress=_stress(prices, bench_prices, weights, total_value),
@@ -378,8 +386,8 @@ def main() -> None:
     bench = bench.rename(columns={sym: key for key, (sym, _, _) in BENCHMARKS.items()})
 
     # Recommended names no longer held still need prices for the track record.
-    recs = load_conviction()
-    gone = [t for t in recs if t not in prices.columns]
+    recs = _load_recs()
+    gone = sorted({r["ticker"] for r in recs if r.get("ticker") and r["ticker"] not in prices.columns})
     rec_prices = fetch_eur_prices({t: _listing_currency(t) for t in gone}, fx_rates) if gone else None
 
     payload = build_payload(

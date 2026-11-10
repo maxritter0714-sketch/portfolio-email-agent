@@ -284,16 +284,31 @@ def test_recommendation_record_judges_against_benchmark():
     idx = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
     prices = pd.DataFrame({"A": [10.0, 10.0, 9.0], "B": [10.0, 10.0, 11.0]}, index=idx)
     bench = pd.Series([100.0, 100.0, 80.0], index=idx)
-    recs = {
-        "A": dict(action="TRIM", report=3, date="2024-01-03"),  # −10 % while the market fell 20 %: beat it, so a miss
-        "B": dict(action="ADD", report=3, date="2024-01-03"),
-        "C": dict(action="RESEARCH", report=3, date="2024-01-03"),
-    }
+    recs = [
+        dict(ticker="A", action="TRIM", report=3, date="2024-01-03"),  # −10 % while the market fell 20 %: beat it, so a miss
+        dict(ticker="B", action="ADD", report=3, date="2024-01-03"),
+        dict(ticker="C", action="RESEARCH", report=3, date="2024-01-03"),
+    ]
     rows = {r["ticker"]: r for r in recommendation_record(recs, prices, bench)}
     assert rows["A"]["excess"] == pytest.approx(0.10)
     assert rows["A"]["hit"] is False
     assert rows["B"]["hit"] is True
     assert rows["C"]["ret"] is None and rows["C"]["hit"] is None
+
+
+def test_recommendation_record_keeps_repeat_advice_and_skips_rows_without_ticker():
+    idx = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+    prices = pd.DataFrame({"A": [10.0, 12.0, 6.0]}, index=idx)
+    bench = pd.Series([100.0, 100.0, 100.0], index=idx)
+    recs = [  # log rows come from CSV, so the issue number is a string
+        dict(ticker="A", action="ADD", report="1", date="2024-01-02"),
+        dict(ticker="A", action="TRIM", report="2", date="2024-01-03"),
+        dict(ticker="", action="RESEARCH", report="2", date="2024-01-03"),
+    ]
+    rows = recommendation_record(recs, prices, bench)
+    assert [(r["report"], r["action"]) for r in rows] == [(2, "TRIM"), (1, "ADD")]
+    assert rows[0]["ret"] == pytest.approx(-0.5)  # measured from its own date
+    assert rows[1]["ret"] == pytest.approx(-0.4)
 
 
 # ── Simulations ─────────────────────────────────────────────────────────────
