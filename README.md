@@ -2,6 +2,8 @@
 
 A fortnightly portfolio briefing in your inbox. Every other Saturday it values your holdings in EUR, compares them with the S&P 500, Nasdaq and MSCI World, picks the news that matters for what you own, and has Claude write the analysis and three to five concrete suggestions. An optional local dashboard goes deeper on the same data.
 
+Built with Python · Claude API · yfinance · NewsAPI · Plotly · GitHub Actions · pytest
+
 <p align="center">
   <img src="docs/images/email-overview.png" width="560" alt="Email masthead: total value, fortnight P&L, weekly/monthly/YTD/total returns, headline, risk metrics and the positions table">
 </p>
@@ -156,7 +158,7 @@ Runs in the cloud; your data stays in a separate private repo.
    - `DATA_REPO_TOKEN`: the token from step 2
    - `ANTHROPIC_API_KEY`, `NEWS_API_KEY`, `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `RECIPIENT_EMAIL`
    - optional: `OPENFIGI_API_KEY`
-4. If your data repo isn't `maxritter0714-sketch/portfolio-agent-data`, add an Actions **variable** `PORTFOLIO_DATA_REPO=owner/name`
+4. Set the Actions **variable** `PORTFOLIO_DATA_REPO=owner/name` to point at your data repo (e.g. `owner/portfolio-agent-data`)
 
 Two workflows then run on their own:
 
@@ -171,9 +173,9 @@ Both push `history.csv`, `conviction.json` and `recommendations.csv` back to the
 
 ```cron
 # full report; the script itself checks for a send Saturday
-0 8 * * 6     cd /path/to/portfolioAgent && /usr/bin/python3 agent.py >> output/agent.log 2>&1
+0 8 * * 6     cd /path/to/portfolio-email-agent && /usr/bin/python3 agent.py >> output/agent.log 2>&1
 # daily data point after the New York close
-30 22 * * 1-5 cd /path/to/portfolioAgent && /usr/bin/python3 agent.py --data-only >> output/agent.log 2>&1
+30 22 * * 1-5 cd /path/to/portfolio-email-agent && /usr/bin/python3 agent.py --data-only >> output/agent.log 2>&1
 ```
 
 ### 7 — Update your holdings (Finanzfluss users)
