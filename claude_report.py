@@ -1,24 +1,26 @@
-"""Claude analysis, headline, actionable parsing, and conviction tracking."""
+"""Claude analysis, headline, actionable parsing, and the recommendation log."""
 from __future__ import annotations
 
 import csv
-import json
 import logging
 import os
 import re
-from datetime import date, timedelta
-import anthropic
+from datetime import date
 
+import anthropic
+import pandas as pd
+
+from analytics import recommendation_record
 from news import _extract_text_from_response, _first_token, _word_in
 from paths import DATA_DIR
 
 log = logging.getLogger(__name__)
 
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-5"
-_CONVICTION_MAX_AGE_DAYS = 182  # older recommendations are dropped
-_CONVICTION_PATH = DATA_DIR / "conviction.json"
-# Append-only log of every recommendation. conviction.json keeps only the
-# latest one per name for the prompt; this file keeps the full history.
+# A call not repeated for this long is closed; a later mention starts a new one.
+CALL_MAX_GAP_DAYS = 182
+# Append-only log of every recommendation; the prompt and the track record
+# derive the open calls from it.
 _RECOMMENDATIONS_PATH = DATA_DIR / "recommendations.csv"
 RECOMMENDATION_FIELDS = ["date", "report", "ticker", "action", "price_eur", "title"]
 
@@ -65,7 +67,7 @@ def _metric(metrics: dict, key: str, spec: str = ".2f", scale: float = 1.0) -> s
 
 
 # ── Claude analysis ───────────────────────────────────────────────────────────
-def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None, events: list[dict] | None = None, allocation: list[dict] | None = None, ref_prices: dict[str, float] | None = None) -> str:
+def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, prior_calls: list[dict] | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None, events: list[dict] | None = None, allocation: list[dict] | None = None) -> str:
     positions_text = "\n".join(
         f"- {p['name']} ({p['ticker']}): {p['shares']:.4g} shares | "
         f"current €{p['price_eur']:.2f} | "
@@ -176,7 +178,7 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         f"{_build_allocation_context(allocation)}\n\n"
         f"PORTFOLIO NEWS\n{port_news_text}\n\n"
         f"GENERAL NEWS\n{gen_news_text}"
-        + _build_conviction_context(conviction, positions, ref_prices)
+        + _build_prior_calls_context(prior_calls)
     )
 
 
@@ -206,27 +208,35 @@ def _build_allocation_context(allocation: list[dict] | None) -> str:
     return "\n\nTARGET ALLOCATION (owner-defined)\n" + "\n".join(lines)
 
 
-def _build_conviction_context(
-    conviction: dict | None, positions: list[dict], ref_prices: dict[str, float] | None = None,
-) -> str:
-    if not conviction:
+def _pct(value: float | None) -> str:
+    return "n/a" if value is None else f"{value * 100:+.1f}%"
+
+
+def _build_prior_calls_context(prior_calls: list[dict] | None) -> str:
+    """Open calls with their return since the day each was first made."""
+    if not prior_calls:
         return ""
-    price_map = {p["ticker"]: p["price_eur"] for p in positions}
-    ref_prices = ref_prices or {}
     lines = []
-    for ticker, rec in conviction.items():
-        price_at = ref_prices.get(ticker) or rec.get("price_eur", 0.0)
-        current = price_map.get(ticker)
-        if current and price_at:
-            chg = (current - price_at) / price_at * 100
-            chg_str = f"{chg:+.1f}% since recommendation"
+    for r in prior_calls:
+        if not r.get("held", True):
+            outcome = "no longer in portfolio"
+        elif r["ret"] is None:
+            outcome = "no price history back to that date"
         else:
-            chg_str = "no longer in portfolio"
+            outcome = f"{_pct(r['ret'])} since first made"
+            if r["excess"] is not None:
+                outcome += (
+                    f", MSCI World {_pct(r['bench_ret'])}, "
+                    f"{r['excess'] * 100:+.1f} points relative"
+                )
         lines.append(
-            f"- {ticker}: {rec['action']} (Report #{rec['report']}, {rec['date']}, "
-            f"€{price_at:.2f} at time) — {chg_str}"
+            f"- {r['ticker']}: {r['action']} (first made in Report #{r['report']}, "
+            f"{r['date']}) — {outcome}"
         )
-    return "\n\nPRIOR RECOMMENDATIONS\n" + "\n".join(lines)
+    return (
+        "\n\nPRIOR RECOMMENDATIONS (still open; euro returns, dividends included)\n"
+        + "\n".join(lines)
+    )
 
 
 _PROMPT_PERSONA = (
@@ -270,7 +280,8 @@ _PROMPT_STRUCTURE = (
     "on its own line as:\n"
     "[ACTION] Title — Detail sentence.\n"
     "where ACTION is EXACTLY one of: TRIM, EXIT, RESEARCH, ADD. Do not use bullets or "
-    "numbers — just the [ACTION] prefix. Example:\n"
+    "numbers — just the [ACTION] prefix. Each item must concern exactly one holding; "
+    "a view on two holdings is two items. Example:\n"
     "[TRIM] Reduce NVDA concentration — At 22% of portfolio, HHI is elevated; "
     "trimming to 15% would still capture upside while diversifying tail risk.\n"
     "CRITICAL: any open recommendation from the PRIOR RECOMMENDATIONS data that is "
@@ -325,13 +336,13 @@ def _assert_analysis_complete(text: str) -> None:
         )
 
 
-def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None, events: list[dict] | None = None, allocation: list[dict] | None = None, ref_prices: dict[str, float] | None = None) -> str:
+def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, prior_calls: list[dict] | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None, events: list[dict] | None = None, allocation: list[dict] | None = None) -> str:
     """Return Claude's analysis as markdown (sections 1-4)."""
     client = anthropic.Anthropic()
 
     system_prompt = "\n\n".join([_PROMPT_PERSONA, _PROMPT_STRUCTURE, _PROMPT_FORMATTING])
 
-    user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction, momentum, lookthrough, events, allocation, ref_prices)
+    user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, prior_calls, momentum, lookthrough, events, allocation)
 
     log.info("Calling Claude API for analysis (model: %s)…", claude_model())
     response = client.messages.create(
@@ -475,16 +486,6 @@ def parse_actionable(text: str) -> list[dict]:
     return items[:5]
 
 
-def load_conviction() -> dict:
-    """Load persisted per-ticker recommendations from conviction.json."""
-    if _CONVICTION_PATH.exists():
-        try:
-            return json.loads(_CONVICTION_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {}
-
-
 def _unique_ticker(hits: list[str]) -> str | None:
     uniq = list(dict.fromkeys(hits))
     if len(uniq) == 1:
@@ -521,30 +522,6 @@ def match_action_ticker(item: dict, positions: list[dict]) -> str | None:
             break
 
     return _unique_ticker(ticker_hits + name_hits)
-
-
-def save_conviction(
-    conviction: dict,
-    actionable_items: list[dict],
-    positions: list[dict],
-    issue_num: int,
-) -> None:
-    """Update conviction.json with any tickers mentioned in this run's actions."""
-    price_map = {p["ticker"]: p["price_eur"] for p in positions}
-    today = date.today().isoformat()
-    cutoff = (date.today() - timedelta(days=_CONVICTION_MAX_AGE_DAYS)).isoformat()
-    for ticker in [t for t, rec in conviction.items() if rec.get("date", "") < cutoff]:
-        del conviction[ticker]
-    for item in actionable_items:
-        matched = match_action_ticker(item, positions)
-        if matched:
-            conviction[matched] = {
-                "action": item["action"],
-                "report": issue_num,
-                "date": today,
-                "price_eur": price_map.get(matched, 0.0),
-            }
-    _CONVICTION_PATH.write_text(json.dumps(conviction, indent=2), encoding="utf-8")
 
 
 def load_recommendations() -> list[dict]:
@@ -591,35 +568,61 @@ def append_recommendations(
 
 
 # ── Recommendation track record ───────────────────────────────────────────────
-_HIT_DIRECTION = {"ADD": 1, "TRIM": -1, "EXIT": -1}
+def _issue(row: dict) -> int | None:
+    report = str(row.get("report") or "")
+    return int(report) if report.isdigit() else None
 
 
-def conviction_scorecard(
-    conviction: dict, positions: list[dict], ref_prices: dict[str, float] | None = None,
+def open_calls(
+    recs: list[dict], today: date | None = None, before_issue: int | None = None,
 ) -> list[dict]:
-    """How each prior recommendation's price moved since it was made.
+    """The open call per ticker, dated from the issue that first made it.
 
-    ADD is a hit when the price rose; TRIM and EXIT when it fell. RESEARCH has
-    no direction. Positions no longer held have no current price. `ref_prices`
-    (split-adjusted) take precedence over the price stored at the time.
+    `recs` are rows of the recommendation log. Repeating the same action keeps
+    the call and its first date; a different action for that name, or a gap of
+    more than `CALL_MAX_GAP_DAYS` between mentions, starts a new call. Calls
+    not repeated within that many days of `today` are closed and left out.
+    `before_issue` ignores rows from that issue onward, so a rerun doesn't
+    count its own recommendations as prior ones.
     """
-    price_map = {p["ticker"]: p["price_eur"] for p in positions}
-    ref_prices = ref_prices or {}
-    rows: list[dict] = []
-    for ticker, rec in conviction.items():
-        price_then = ref_prices.get(ticker) or rec.get("price_eur") or 0.0
-        price_now = price_map.get(ticker)
-        change_pct = None
-        if price_now and price_then:
-            change_pct = (price_now - price_then) / price_then * 100
-        direction = _HIT_DIRECTION.get(rec.get("action", ""))
-        hit = None
-        if direction is not None and change_pct:
-            hit = (change_pct > 0) == (direction > 0)
-        rows.append(dict(
-            ticker=ticker, action=rec.get("action", ""), report=rec.get("report", 0),
-            date=rec.get("date", ""), price_then=price_then, price_now=price_now,
-            change_pct=change_pct, hit=hit,
-        ))
-    rows.sort(key=lambda r: (-r["report"], r["ticker"]))
+    today = today or date.today()
+    calls: dict[str, dict] = {}
+    rows = [r for r in recs if r.get("ticker") and r.get("date")]
+    if before_issue is not None:
+        rows = [r for r in rows if (_issue(r) or 0) < before_issue]
+    for row in sorted(rows, key=lambda r: r["date"]):
+        day = date.fromisoformat(row["date"])
+        call = calls.get(row["ticker"])
+        repeated = (
+            call is not None
+            and call["action"] == row["action"]
+            and (day - call["last_date"]).days <= CALL_MAX_GAP_DAYS
+        )
+        if repeated:
+            call["last_date"] = day
+        else:
+            calls[row["ticker"]] = dict(
+                ticker=row["ticker"], action=row["action"], report=_issue(row),
+                date=row["date"], last_date=day,
+            )
+    return [
+        {k: v for k, v in call.items() if k != "last_date"}
+        for call in calls.values()
+        if (today - call["last_date"]).days <= CALL_MAX_GAP_DAYS
+    ]
+
+
+def track_record(
+    positions: list[dict], prices: pd.DataFrame, bench: pd.Series, before_issue: int,
+) -> list[dict]:
+    """Open calls scored like the dashboard: return since first made, against the MSCI World.
+
+    `prices` are EUR closes (dates × tickers) and `bench` the benchmark's.
+    Each row carries `held`, False once the name has left the portfolio.
+    """
+    calls = open_calls(load_recommendations(), before_issue=before_issue)
+    held = {p["ticker"] for p in positions}
+    rows = recommendation_record(calls, prices, bench)
+    for row in rows:
+        row["held"] = row["ticker"] in held
     return rows

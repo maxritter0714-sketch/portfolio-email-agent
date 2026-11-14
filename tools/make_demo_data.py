@@ -126,18 +126,16 @@ def _recommendations(px: pd.DataFrame, today: date) -> None:
     last_send = today - timedelta(days=1)
     while not is_send_saturday(last_send):
         last_send -= timedelta(days=1)
-    rows, conviction = [], {}
+    rows = []
     for ago, ticker, action, title in _RECS:
         d = last_send - timedelta(weeks=2 * (ago - 1))
         issue = issue_number(d)
         price = ""
         if ticker:
             price = round(float(px[ticker][px.index <= pd.Timestamp(d)].iloc[-1]), 2)
-            conviction[ticker] = dict(action=action, report=issue, date=d.isoformat(), price_eur=price)
         rows.append([d.isoformat(), issue, ticker, action, price, title])
     _write_csv(DEMO_DIR / "recommendations.csv",
                ["date", "report", "ticker", "action", "price_eur", "title"], rows)
-    (DEMO_DIR / "conviction.json").write_text(json.dumps(conviction, indent=2), encoding="utf-8")
 
 
 def _targets() -> None:

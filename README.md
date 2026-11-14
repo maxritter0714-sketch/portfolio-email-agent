@@ -152,7 +152,7 @@ python agent.py --force             # send a real email now
 
 Runs in the cloud; your data stays in a separate private repo.
 
-1. Create a **private** repo (e.g. `portfolio-agent-data`) and upload your holdings: `finanzfluss_export.csv` (converted on every run) or a hand-kept `portfolio.csv`. Add `isin_map.json`, `targets.json` and `cashflows.csv` if you use them. `history.csv`, `conviction.json` and `recommendations.csv` are created by the first run
+1. Create a **private** repo (e.g. `portfolio-agent-data`) and upload your holdings: `finanzfluss_export.csv` (converted on every run) or a hand-kept `portfolio.csv`. Add `isin_map.json`, `targets.json` and `cashflows.csv` if you use them. `history.csv` and `recommendations.csv` are created by the first run
 2. Create a fine-grained Personal Access Token for that repo with **Contents: Read and write**
 3. In this repo, under **Settings → Secrets and variables → Actions**, add:
    - `DATA_REPO_TOKEN`: the token from step 2
@@ -250,14 +250,14 @@ Claude (claude-sonnet-5 by default)
   ├── Portfolio performance
   ├── Benchmark comparison
   ├── News & market context
-  └── Actionable suggestions ──→ recommendations.csv / conviction.json
+  └── Actionable suggestions ──→ recommendations.csv
                     │
                     ▼
 HTML email ──→ Gmail SMTP ──→ your inbox
 ```
 
 - **Deposit-free history.** Each `history.csv` row chains the EUR price return of your current holdings since the previous trading day. Money paid in or taken out never shows up as performance. The chart appears once four indexed rows exist.
-- **Recommendation memory.** Each report reads the latest advice per name (`conviction.json`) so Claude can follow up on earlier calls, and the email's track record checks whether each call moved the right way. Every call is also appended to `recommendations.csv`; the dashboard scores those against the MSCI World.
+- **Recommendation memory.** Every call is appended to `recommendations.csv`. Each report reads the open calls from it, dated from the issue that first made them, so Claude can follow up and repeating a call doesn't restart its clock. The email's track record and the dashboard score calls the same way: against the MSCI World since the day they were made.
 - **Warnings.** A banner under the masthead flags a holdings or cash-flow export older than 30 days, and holdings whose ISIN couldn't be mapped.
 
 ### What stays private
@@ -265,7 +265,7 @@ HTML email ──→ Gmail SMTP ──→ your inbox
 | Where | What |
 |---|---|
 | This (public) repo | Code, `*.example` templates and the synthetic demo in `docs/demo/` |
-| Private data repo | Holdings export, `history.csv`, `conviction.json`, `recommendations.csv`, `cashflows.csv`, `isin_map.json`, `targets.json` |
+| Private data repo | Holdings export, `history.csv`, `recommendations.csv`, `cashflows.csv`, `isin_map.json`, `targets.json` |
 | Your machine only | `.env`, the raw transactions export, `output/` (log, preview, dashboard) |
 
 ---

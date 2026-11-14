@@ -567,6 +567,16 @@ def fetch_portfolio_data(
     return positions, summary, unknown_fx, skipped
 
 
+def year_of_closes(symbol: str) -> pd.Series:
+    """Last year of adjusted closes, from the price cache when the run already fetched them."""
+    cached = _hist_cache.get(symbol)
+    if cached is not None:
+        return cached
+    close = yf.Ticker(symbol).history(period="1y")["Close"]
+    _hist_cache[symbol] = close
+    return close
+
+
 def sp500_index_close() -> pd.Series | None:
     """Recent closes of the S&P 500 price index (cached), or None if Yahoo has none."""
     cached = _hist_cache.get(SP500_INDEX)
@@ -991,27 +1001,29 @@ def generate_charts(positions: list[dict], summary: dict,
     return charts
 
 
-# ── Recommendation reference prices ───────────────────────────────────────────
-def recommendation_ref_prices(
-    conviction: dict, positions: list[dict], fx_rates: dict[str, float],
-) -> dict[str, float]:
-    """Split-adjusted EUR close on each recommendation's date, from cached history.
+# ── Recommendation track record prices ────────────────────────────────────────
+def recommendation_prices(
+    positions: list[dict], fx_rates: dict[str, float],
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Last year of EUR closes for the track record: the holdings and the MSCI World ETF.
 
-    The price stored in conviction.json is unadjusted, so a stock split after
-    the recommendation would show up as a fake crash. Tickers without history
-    covering that date are left out; callers fall back to the stored price.
+    Closes are split- and dividend-adjusted, so a split after a recommendation
+    doesn't show up as a fake crash. Holdings come from the run's price cache
+    (dates × tickers); the benchmark series is empty if Yahoo has no data.
     """
-    currency_of = {p["ticker"]: p.get("currency", "USD") for p in positions}
-    out: dict[str, float] = {}
-    for ticker, rec in conviction.items():
-        close = _hist_cache.get(ticker)
-        if ticker not in currency_of or close is None or close.empty or not rec.get("date"):
+    cols: dict[str, pd.Series] = {}
+    for p in positions:
+        close = _hist_cache.get(p["ticker"])
+        if close is None or close.empty:
             continue
-        eur = _to_eur_close(close, currency_of[ticker], fx_rates).dropna()
-        before = eur[eur.index <= pd.Timestamp(rec["date"])]
-        if not before.empty:
-            out[ticker] = float(before.iloc[-1])
-    return out
+        cols[p["ticker"]] = _to_eur_close(close, p.get("currency", "USD"), fx_rates).dropna()
+    symbol = BENCHMARK_ETFS["world"][0]
+    try:
+        world = _naive_dates(year_of_closes(symbol).astype(float)).dropna()
+    except Exception as exc:
+        log.warning("Could not fetch %s for the track record (%s)", symbol, exc)
+        world = pd.Series(dtype=float)
+    return pd.DataFrame(cols).sort_index(), world
 
 
 # ── Upcoming events ───────────────────────────────────────────────────────────

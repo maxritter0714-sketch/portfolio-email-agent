@@ -15,5 +15,5 @@ adds notes for other agents, mostly used for code review.
   single-call Claude analysis).
 - Never read out, print, or commit secrets or personal data: `.env` and
   everything in `data/` except the `*.example` templates (holdings, Finanzfluss
-  exports, cash flows, history, conviction, ISIN overrides, targets).
+  exports, cash flows, history, recommendations, ISIN overrides, targets).
 - Reviews are read-only: report findings, don't commit or push.

@@ -26,11 +26,9 @@ from claude_report import (
     append_recommendations,
     call_claude,
     call_claude_headline,
-    conviction_scorecard,
-    load_conviction,
     parse_actionable,
-    save_conviction,
     split_analysis,
+    track_record,
 )
 from email_html import build_html_email
 from paths import OUTPUT_DIR
@@ -53,7 +51,7 @@ from market import (
     load_targets,
     load_unmapped_isins,
     next_portfolio_index,
-    recommendation_ref_prices,
+    recommendation_prices,
     sp500_index_close,
     value_change_breakdown,
 )
@@ -282,22 +280,19 @@ def main() -> None:
         charts = generate_charts(positions, summary, benchmarks)
 
         log.info("Calling Claude for analysis…")
-        conviction = load_conviction()
         current_issue = issue_number()
-        conviction_prior = {k: v for k, v in conviction.items() if v.get("report", 0) < current_issue}
-        ref_prices = recommendation_ref_prices(conviction_prior, positions, fx_rates)
+        rec_prices, world_close = recommendation_prices(positions, fx_rates)
+        scorecard = track_record(positions, rec_prices, world_close, before_issue=current_issue)
         analysis_raw = call_claude(
             positions, summary, benchmarks, port_news, gen_news, metrics,
-            conviction_prior, momentum_data, lookthrough_data, events, allocation, ref_prices,
+            scorecard, momentum_data, lookthrough_data, events, allocation,
         )
         _assert_analysis_complete(analysis_raw)
         analysis_body, actionable_raw = split_analysis(analysis_raw)
         actionable_items = parse_actionable(actionable_raw)
-        scorecard = conviction_scorecard(conviction_prior, positions, ref_prices)
         if args.preview:
-            log.info("Preview — conviction.json and recommendations.csv left unchanged")
+            log.info("Preview — recommendations.csv left unchanged")
         else:
-            save_conviction(conviction, actionable_items, positions, current_issue)
             append_recommendations(actionable_items, positions, current_issue)
 
         log.info("Calling Claude for headline…")

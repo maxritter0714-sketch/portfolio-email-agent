@@ -76,14 +76,6 @@ def _finite(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _year_of_closes(symbol: str) -> pd.Series:
-    """Last year of closes, from the price cache when the run already fetched them."""
-    cached = market._hist_cache.get(symbol)
-    if cached is not None:
-        return cached
-    return yf.Ticker(symbol).history(period="1y")["Close"]
-
-
 def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) -> dict:
     """Risk figures of today's holdings over the last year, from the dashboard's engine.
 
@@ -106,7 +98,7 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
     for p in positions:
         ticker = p["ticker"]
         try:
-            close = _year_of_closes(ticker)
+            close = market.year_of_closes(ticker)
             if close is None or close.empty or len(close) < MIN_HISTORY_DAYS:
                 continue
             eur = _to_eur_close(close, p.get("currency", "USD"), fx_rates).dropna()
@@ -128,7 +120,7 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
 
     try:
         bench = pd.DataFrame({
-            key: _to_eur_close(_year_of_closes(market.BENCHMARK_ETFS[key][0]), "EUR", fx_rates)
+            key: _to_eur_close(market.year_of_closes(market.BENCHMARK_ETFS[key][0]), "EUR", fx_rates)
             for key in ("sp500", "world")
         })
     except Exception as exc:

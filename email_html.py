@@ -368,39 +368,53 @@ def _events_html(events: list[dict]) -> str:
     )
 
 
+def _scorecard_pct(value: float | None) -> tuple[str, str]:
+    if value is None:
+        return "&ndash;", TEXT_SECONDARY
+    return f"{value * 100:+.1f}%", _color(value)
+
+
 def _scorecard_html(scorecard: list[dict]) -> str:
+    """Open calls since the issue that first made them, judged against the MSCI World."""
     calls = [r for r in scorecard if r["hit"] is not None]
     hits = sum(1 for r in calls if r["hit"])
     summary = ""
     if calls:
         summary = (
             f'<p style="font-family:Georgia,serif;font-size:15px;margin:0 0 16px">'
-            f'{hits} of {len(calls)} directional calls moved the right way so far.</p>'
+            f'{hits} of {len(calls)} directional calls are right against the MSCI World so far: '
+            f'an ADD should beat it, a TRIM or EXIT should lag it.</p>'
         )
     rows = ""
     for r in scorecard:
-        if r["change_pct"] is None:
-            change, change_color = "no longer held", TEXT_SECONDARY
+        if not r.get("held", True):
+            ret, ret_color = "no longer held", TEXT_SECONDARY
         else:
-            change, change_color = _fmt(r["change_pct"]), _color(r["change_pct"])
+            ret, ret_color = _scorecard_pct(r["ret"])
+        world, _ = _scorecard_pct(r["bench_ret"])
+        relative, relative_color = _scorecard_pct(r["excess"])
         if r["hit"] is None:
             verdict = "&ndash;"
         else:
             verdict = "&#10003;" if r["hit"] else "&#10007;"
+        since = f'No. {r["report"]}' if r["report"] is not None else html.escape(r["date"])
         rows += (
             "<tr>"
             + _small_td(html.escape(r["ticker"]))
             + _small_td(html.escape(r["action"]))
-            + _small_td(f'No. {r["report"]}', "right", TEXT_SECONDARY)
-            + _small_td(change, "right", change_color)
+            + _small_td(since, "right", TEXT_SECONDARY)
+            + _small_td(ret, "right", ret_color)
+            + _small_td(world, "right", TEXT_SECONDARY)
+            + _small_td(relative, "right", relative_color)
             + _small_td(verdict, "center")
             + "</tr>"
         )
     return (
         summary
         + '<table width="100%" cellpadding="0" cellspacing="0"><thead><tr>'
-        + _small_th("Ticker") + _small_th("Call") + _small_th("Issue", "right")
-        + _small_th("Since", "right") + _small_th("Hit", "center")
+        + _small_th("Ticker") + _small_th("Call") + _small_th("Since", "right")
+        + _small_th("Return", "right") + _small_th("World", "right")
+        + _small_th("Relative", "right") + _small_th("Hit", "center")
         + f"</tr></thead><tbody>{rows}</tbody></table>"
     )
 

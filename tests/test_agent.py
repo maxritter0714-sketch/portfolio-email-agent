@@ -1,5 +1,4 @@
 ﻿"""Tests for pure functions across the agent modules."""
-import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,9 +13,10 @@ from claude_report import (
     append_recommendations,
     load_recommendations,
     match_action_ticker,
+    open_calls,
     parse_actionable,
-    save_conviction,
     split_analysis,
+    track_record,
 )
 from email_html import _emphasize_numbers, _eur_signed, _markdown_to_html, build_html_email
 from market import (
@@ -286,21 +286,6 @@ def test_match_action_ticker_ignores_short_name_token():
     sap = {"ticker": "SAP.DE", "name": "SAP SE", "price_eur": 180.0}
     item = {"title": "Review the software names", "detail": ""}
     assert match_action_ticker(item, [sap]) is None
-
-
-def test_save_conviction_writes_name_match(tmp_path, monkeypatch):
-    path = tmp_path / "conviction.json"
-    monkeypatch.setattr("claude_report._CONVICTION_PATH", path)
-    conviction: dict = {}
-    save_conviction(
-        conviction,
-        [{"action": "TRIM", "title": "Reduce Nvidia", "detail": "Too big."}],
-        [_POS_NVDA],
-        issue_num=12,
-    )
-    saved = json.loads(path.read_text(encoding="utf-8"))
-    assert saved["NVDA"]["action"] == "TRIM"
-    assert saved["NVDA"]["report"] == 12
 
 
 # ── Recommendation log ────────────────────────────────────────────────────────
@@ -1115,41 +1100,113 @@ def test_load_targets_missing_file_returns_none(tmp_path):
     assert market.load_targets(tmp_path / "targets.json") is None
 
 
-# ── Conviction track record ───────────────────────────────────────────────────
+# ── Recommendation track record ───────────────────────────────────────────────
 
-def test_conviction_scorecard_hits_and_misses():
-    from claude_report import conviction_scorecard
-    conviction = {
-        "UP": {"action": "ADD", "report": 40, "date": "2026-09-05", "price_eur": 100.0},
-        "DOWN": {"action": "ADD", "report": 41, "date": "2026-09-19", "price_eur": 100.0},
-        "CUT": {"action": "TRIM", "report": 41, "date": "2026-09-19", "price_eur": 100.0},
-        "LOOK": {"action": "RESEARCH", "report": 42, "date": "2026-10-03", "price_eur": 50.0},
-        "GONE": {"action": "EXIT", "report": 39, "date": "2026-08-22", "price_eur": 20.0},
-    }
-    positions = [
-        {"ticker": "UP", "price_eur": 120.0}, {"ticker": "DOWN", "price_eur": 90.0},
-        {"ticker": "CUT", "price_eur": 80.0}, {"ticker": "LOOK", "price_eur": 55.0},
+def _rec(day: str, report: int, ticker: str, action: str) -> dict:
+    return dict(date=day, report=str(report), ticker=ticker, action=action, price_eur="", title="")
+
+
+_TODAY = real_date(2026, 11, 14)
+
+
+def test_open_calls_keep_the_date_of_the_first_call_when_repeated():
+    recs = [
+        _rec("2026-09-05", 44, "AAA", "EXIT"),
+        _rec("2026-09-19", 45, "AAA", "EXIT"),
+        _rec("2026-10-31", 48, "AAA", "EXIT"),
     ]
-    rows = {r["ticker"]: r for r in conviction_scorecard(conviction, positions)}
-    assert rows["UP"]["hit"] is True and rows["UP"]["change_pct"] == pytest.approx(20.0)
-    assert rows["DOWN"]["hit"] is False
-    assert rows["CUT"]["hit"] is True
-    assert rows["LOOK"]["hit"] is None
-    assert rows["GONE"]["change_pct"] is None and rows["GONE"]["hit"] is None
+    assert open_calls(recs, today=_TODAY) == [
+        dict(ticker="AAA", action="EXIT", report=44, date="2026-09-05"),
+    ]
 
 
-def test_save_conviction_drops_stale_entries(tmp_path, monkeypatch):
-    monkeypatch.setattr("claude_report._CONVICTION_PATH", tmp_path / "conviction.json")
-    from datetime import timedelta
-    today = real_date.today()
-    conviction = {
-        "OLD": {"action": "ADD", "report": 10,
-                "date": (today - timedelta(days=200)).isoformat(), "price_eur": 1.0},
-        "NEW": {"action": "ADD", "report": 40,
-                "date": (today - timedelta(days=30)).isoformat(), "price_eur": 1.0},
-    }
-    save_conviction(conviction, [], [], issue_num=45)
-    assert "OLD" not in conviction and "NEW" in conviction
+def test_open_calls_start_a_new_call_when_the_action_changes():
+    recs = [
+        _rec("2026-06-14", 18, "AAA", "TRIM"),
+        _rec("2026-09-05", 44, "AAA", "EXIT"),
+        _rec("2026-09-19", 45, "AAA", "EXIT"),
+    ]
+    assert open_calls(recs, today=_TODAY) == [
+        dict(ticker="AAA", action="EXIT", report=44, date="2026-09-05"),
+    ]
+
+
+def test_open_calls_close_after_half_a_year_without_a_repeat():
+    recs = [
+        _rec("2026-01-10", 27, "OLD", "ADD"),      # last mention too long ago: closed
+        _rec("2026-01-10", 27, "BACK", "ADD"),     # mentioned again after a long gap:
+        _rec("2026-10-31", 48, "BACK", "ADD"),     # a new call from the later date
+        _rec("2026-10-31", 48, "", "RESEARCH"),    # matched no holding
+    ]
+    assert open_calls(recs, today=_TODAY) == [
+        dict(ticker="BACK", action="ADD", report=48, date="2026-10-31"),
+    ]
+
+
+def test_open_calls_ignore_the_current_issue_on_a_rerun():
+    recs = [_rec("2026-10-31", 48, "AAA", "TRIM"), _rec("2026-11-14", 49, "AAA", "EXIT")]
+    assert open_calls(recs, today=_TODAY, before_issue=49) == [
+        dict(ticker="AAA", action="TRIM", report=48, date="2026-10-31"),
+    ]
+
+
+def test_track_record_scores_a_call_like_the_dashboard(tmp_path, monkeypatch):
+    import csv
+    from analytics import recommendation_record
+    from claude_report import RECOMMENDATION_FIELDS
+
+    recs = [
+        _rec("2026-09-05", 44, "UP", "TRIM"),
+        _rec("2026-10-31", 48, "UP", "TRIM"),
+        _rec("2026-09-05", 44, "GONE", "EXIT"),
+    ]
+    path = tmp_path / "recommendations.csv"
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=RECOMMENDATION_FIELDS)
+        writer.writeheader()
+        writer.writerows(recs)
+    monkeypatch.setattr("claude_report._RECOMMENDATIONS_PATH", path)
+
+    idx = pd.to_datetime(["2026-09-04", "2026-10-30", "2026-11-13"])
+    prices = pd.DataFrame({"UP": [100.0, 104.0, 110.0]}, index=idx)
+    bench = pd.Series([100.0, 110.0, 120.0], index=idx)
+
+    rows = {r["ticker"]: r for r in track_record([{"ticker": "UP"}], prices, bench, before_issue=49)}
+    up = rows["UP"]
+    # Since the first call (+10%), not since the repeat two weeks ago (+5.8%).
+    assert up["ret"] == pytest.approx(0.10) and up["report"] == 44
+    # The price rose, but it lagged the MSCI World by 10 points: the TRIM was right.
+    assert up["excess"] == pytest.approx(-0.10) and up["hit"] is True and up["held"] is True
+    assert rows["GONE"]["held"] is False and rows["GONE"]["hit"] is None
+
+    dashboard = recommendation_record([recs[0]], prices, bench)[0]
+    assert {k: up[k] for k in dashboard} == dashboard
+
+
+def test_recommendation_prices_come_from_the_cache_in_eur(monkeypatch):
+    idx = pd.to_datetime(["2026-07-09", "2026-07-10"])
+    world = market.BENCHMARK_ETFS["world"][0]
+    monkeypatch.setattr(market, "_hist_cache", {
+        "APH": pd.Series([69.0, 70.0], index=idx), world: pd.Series([100.0, 101.0], index=idx),
+    })
+    positions = [{"ticker": "APH", "currency": "EUR"}, {"ticker": "NOHIST", "currency": "EUR"}]
+    prices, bench = market.recommendation_prices(positions, {"EUR": 1.0})
+    assert list(prices.columns) == ["APH"] and prices["APH"].iloc[-1] == 70.0
+    assert bench.iloc[-1] == 101.0
+
+
+def test_prompt_lists_open_calls_against_the_msci_world():
+    from claude_report import _build_prior_calls_context
+    text = _build_prior_calls_context([
+        dict(ticker="UP", action="TRIM", report=44, date="2026-09-05",
+             ret=0.10, bench_ret=0.20, excess=-0.10, hit=True, held=True),
+        dict(ticker="GONE", action="EXIT", report=44, date="2026-09-05",
+             ret=None, bench_ret=0.20, excess=None, hit=None, held=False),
+    ])
+    assert "UP: TRIM (first made in Report #44, 2026-09-05)" in text
+    assert "+10.0% since first made, MSCI World +20.0%, -10.0 points relative" in text
+    assert "GONE: EXIT" in text and "no longer in portfolio" in text
+    assert _build_prior_calls_context([]) == ""
 
 
 # ── Optional email sections ───────────────────────────────────────────────────
@@ -1164,28 +1221,12 @@ def test_optional_sections_numbered_after_actionable():
     html_out = _minimal_email(
         events=[{"date": real_date(2026, 11, 5), "kind": "Earnings", "ticker": "MSFT", "name": "Microsoft"}],
         scorecard=[{"ticker": "UP", "action": "ADD", "report": 40, "date": "2026-09-05",
-                    "price_then": 100.0, "price_now": 120.0, "change_pct": 20.0, "hit": True}],
+                    "ret": 0.20, "bench_ret": 0.05, "excess": 0.15, "hit": True, "held": True}],
     )
     assert "VII.</span> Coming Up" in html_out
     assert "VIII.</span> Track Record" in html_out
     assert "1 of 1 directional calls" in html_out
-
-
-def test_conviction_scorecard_prefers_split_adjusted_reference():
-    from claude_report import conviction_scorecard
-    conviction = {"APH": {"action": "ADD", "report": 19, "date": "2026-07-11", "price_eur": 140.0}}
-    positions = [{"ticker": "APH", "price_eur": 72.0}]
-    rows = conviction_scorecard(conviction, positions, ref_prices={"APH": 70.0})
-    assert rows[0]["change_pct"] == pytest.approx(2.857, abs=0.01)
-    assert rows[0]["hit"] is True
-
-
-def test_recommendation_ref_prices_uses_history_on_date(monkeypatch):
-    idx = pd.to_datetime(["2026-07-09", "2026-07-10", "2026-07-13"])
-    monkeypatch.setattr(market, "_hist_cache", {"APH": pd.Series([69.0, 70.0, 71.0], index=idx)})
-    conviction = {"APH": {"date": "2026-07-11"}, "GONE": {"date": "2026-07-11"}}
-    positions = [{"ticker": "APH", "currency": "EUR"}]
-    assert market.recommendation_ref_prices(conviction, positions, {"EUR": 1.0}) == {"APH": 70.0}
+    assert "+20.0%" in html_out and "+15.0%" in html_out
 
 
 # ── Holdings freshness and unmapped ISINs ─────────────────────────────────────

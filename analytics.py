@@ -434,6 +434,8 @@ def recommendation_record(recs: list[dict], prices: pd.DataFrame, bench: pd.Seri
     raw price, so a falling market doesn't make every TRIM look clever.
     """
     rows = []
+    bench = bench.dropna()
+    b_now = float(bench.iloc[-1]) if not bench.empty else None
     for rec in recs:
         ticker = rec.get("ticker") or ""
         if not ticker:
@@ -441,7 +443,7 @@ def recommendation_record(recs: list[dict], prices: pd.DataFrame, bench: pd.Seri
         day = pd.Timestamp(rec["date"])
         series = prices[ticker].dropna() if ticker in prices.columns else pd.Series(dtype=float)
         then, now = _close_on(series, day), (float(series.iloc[-1]) if not series.empty else None)
-        b_then, b_now = _close_on(bench, day), _close_on(bench, bench.index[-1])
+        b_then = _close_on(bench, day)
         ret = now / then - 1 if then and now else None
         bench_ret = b_now / b_then - 1 if b_then and b_now else None
         excess = ret - bench_ret if ret is not None and bench_ret is not None else None
