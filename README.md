@@ -5,7 +5,7 @@ A fortnightly portfolio briefing in your inbox. Every other Saturday it values y
 Built with Python · Claude API · yfinance · NewsAPI · Plotly · GitHub Actions · pytest
 
 <p align="center">
-  <img src="docs/images/email-overview.png" width="560" alt="Email masthead: total value, fortnight P&L, weekly/monthly/YTD/total returns, headline, risk metrics and the positions table">
+  <img src="docs/images/email-overview.png" width="560" alt="Email masthead: total value, fortnight change, weekly/monthly/YTD/total returns, headline, risk metrics and the positions table">
 </p>
 
 <sub>All screenshots come from a made-up demo portfolio (`docs/demo/`) priced with real market data. No real holdings are shown.</sub>
@@ -15,7 +15,7 @@ Built with Python · Claude API · yfinance · NewsAPI · Plotly · GitHub Actio
 ## What you get
 
 **The email** (every other Saturday, the main product)
-- Masthead with value, fortnight P&L, weekly / monthly / YTD / total return, and a split of the value change into *money paid in* vs *market gain*
+- Masthead with value, the fortnight's change, weekly / monthly / YTD returns of today's holdings, your total return, and a split of the value change into *money paid in* vs *market gain*
 - A one-line headline and a risk panel: Sharpe, Sortino, beta, alpha, max drawdown, VaR, volatility, concentration
 - Positions table, a deposit-free portfolio index against the S&P 500, allocation, sector and region charts, top and bottom movers
 - **The Analysis** by Claude: performance, benchmark comparison, and what the news means for *this* portfolio

@@ -454,6 +454,23 @@ def _expense_ratio(info: dict) -> float | None:
     return ter / 100 if isinstance(ter, (int, float)) else None
 
 
+def portfolio_return(positions: list[dict], key: str) -> float:
+    """Percent return of today's holdings held unchanged over the window behind `key`.
+
+    Each position's start value is its value today divided by its growth, so
+    the result is total value now over total value then. Averaging the
+    position returns by today's weights instead would overweight the winners.
+    """
+    end = start = 0.0
+    for p in positions:
+        growth = 1.0 + p[key] / 100.0
+        if growth <= 0:
+            continue
+        end += p["value_eur"]
+        start += p["value_eur"] / growth
+    return (end / start - 1.0) * 100.0 if start else 0.0
+
+
 def fetch_portfolio_data(
     rows: list[dict], fx_rates: dict[str, float]
 ) -> tuple[list[dict], dict, list[dict], list[dict]]:
@@ -462,7 +479,6 @@ def fetch_portfolio_data(
     skipped: list[dict] = []
     total_value_eur = 0.0
     total_cost_eur = 0.0
-    weighted_weekly = weighted_fortnight = weighted_monthly = weighted_ytd = 0.0
 
     for row in rows:
         symbol = row["ticker"].strip()
@@ -507,20 +523,16 @@ def fetch_portfolio_data(
 
         total_value_eur += value_eur
         total_cost_eur += cost_eur
-        weighted_weekly += weekly * value_eur
-        weighted_fortnight += fortnight * value_eur
-        weighted_monthly += monthly * value_eur
-        weighted_ytd += ytd * value_eur
 
     log.info("Fetched data for %d / %d positions", len(positions), len(rows))
 
     total_pl_eur = total_value_eur - total_cost_eur
     total_pl_pct = total_pl_eur / total_cost_eur * 100 if total_cost_eur else 0.0
 
-    port_weekly = weighted_weekly / total_value_eur if total_value_eur else 0.0
-    port_fortnight = weighted_fortnight / total_value_eur if total_value_eur else 0.0
-    port_monthly = weighted_monthly / total_value_eur if total_value_eur else 0.0
-    port_ytd = weighted_ytd / total_value_eur if total_value_eur else 0.0
+    port_weekly = portfolio_return(positions, "weekly_pct")
+    port_fortnight = portfolio_return(positions, "fortnight_pct")
+    port_monthly = portfolio_return(positions, "monthly_pct")
+    port_ytd = portfolio_return(positions, "ytd_pct")
 
     total_dividends_ttm_eur = sum(p["dividend_ttm_eur"] for p in positions)
     portfolio_yield_pct = total_dividends_ttm_eur / total_value_eur * 100 if total_value_eur else 0.0

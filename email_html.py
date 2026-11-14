@@ -515,10 +515,15 @@ def build_html_email(
     vs_jan       = summary.get("value_vs_jan_pct")
     lifetime     = summary.get("lifetime")
     # (label, pct, euro amount, caption); fortnight already leads the masthead.
+    # Window returns describe today's holdings held unchanged, so they carry no
+    # euro amount: only Total (from cash flows) is money actually gained.
     stats = [
-        (label, summary[key], _pl_from_pct(total, summary[key]), "")
+        (label, summary[key], None, "")
         for label, key in (("Weekly", "weekly_pct"), ("Monthly", "monthly_pct"), ("YTD", "ytd_pct"))
     ]
+    holdings_caption = "Returns of today's holdings, held unchanged." + (
+        " Actual gain below." if breakdown else ""
+    )
     if lifetime:
         stats.append(("Total", lifetime["pct"], lifetime["gain"], ""))
     if vs_jan is not None:
@@ -846,7 +851,7 @@ def build_html_email(
       <div class="mast-num" style="font-family:Georgia,serif;font-size:32px;color:{BG_CREAM};font-variant-numeric:tabular-nums">€{total:,.0f}</div>
     </td>
     <td class="mast-col" style="width:50%;vertical-align:top">
-      <div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};margin-bottom:8px">Fortnight P&amp;L</div>
+      <div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};margin-bottom:8px">Fortnight</div>
       <div class="mast-num" style="font-family:Georgia,serif;font-size:32px;color:{fortnight_color};font-variant-numeric:tabular-nums">{_eur_signed(fortnight_pl)} <span class="mast-num-sub" style="font-size:18px;color:{TEXT_SECONDARY}">({fortnight_pct:+.2f}%)</span></div>
     </td>
   </tr></table>
@@ -855,6 +860,7 @@ def build_html_email(
       {mast_stats}
     </tr>
   </table>
+  <div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;color:{TEXT_SECONDARY};margin-top:12px;line-height:1.4">{holdings_caption}</div>
   {breakdown_html}
 </td></tr>
 </table>

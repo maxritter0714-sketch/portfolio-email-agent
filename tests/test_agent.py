@@ -681,7 +681,7 @@ def test_masthead_shows_vs_january_beside_price_ytd():
     assert "Includes cash in/out" in html_out
 
 
-def test_masthead_stats_show_euro_amounts_and_lifetime_total():
+def test_masthead_stats_show_lifetime_total_in_euros_only():
     lifetime = dict(since=real_date(2022, 8, 16), invested=8_000.0, gain=2_000.0, pct=25.0, income=0.0)
     html_out = _minimal_email(
         summary=dict(
@@ -696,7 +696,7 @@ def test_masthead_stats_show_euro_amounts_and_lifetime_total():
     )
     stats_row = html_out[html_out.index(">Weekly<"):]
     assert ">Monthly<" in stats_row and ">Fortnight<" not in stats_row
-    assert "+€800" in stats_row  # 8% gain ending at €10,800
+    assert "+€800" not in stats_row  # window returns show no euro amount
     assert ">Total<" in stats_row and "+25.00%" in stats_row and "+€2,000" in stats_row
     assert "width:25%" in stats_row
 
@@ -1192,3 +1192,28 @@ def test_email_shows_value_breakdown():
     assert "Since 14 Jun 2026" in html_out
     assert "+€1,500" in html_out and "+€1,000" in html_out
     assert "split is unreliable" not in html_out
+    assert "Actual gain below." in html_out
+
+
+def test_email_window_returns_carry_no_euro_amount():
+    html_out = _minimal_email(summary=dict(
+        total_value_eur=10800.0, fortnight_pct=1.0, monthly_pct=2.0, weekly_pct=0.5,
+        ytd_pct=8.0, portfolio_yield_pct=1.2,
+    ))
+    assert "Returns of today's holdings, held unchanged." in html_out
+    assert "Actual gain below." not in html_out
+    assert "+€800" not in html_out  # the YTD euro amount of 10,800 at +8 %
+
+
+# ── portfolio_return ──────────────────────────────────────────────────────────
+
+def test_portfolio_return_is_buy_and_hold_not_end_weighted():
+    # Equal start values of 100: one doubles, one halves -> 250 from 200.
+    positions = [dict(value_eur=200.0, ytd_pct=100.0), dict(value_eur=50.0, ytd_pct=-50.0)]
+    assert market.portfolio_return(positions, "ytd_pct") == pytest.approx(25.0)
+
+
+def test_portfolio_return_skips_total_loss_and_empty():
+    positions = [dict(value_eur=0.0, ytd_pct=-100.0), dict(value_eur=110.0, ytd_pct=10.0)]
+    assert market.portfolio_return(positions, "ytd_pct") == pytest.approx(10.0)
+    assert market.portfolio_return([], "ytd_pct") == 0.0
