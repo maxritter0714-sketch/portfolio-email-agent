@@ -160,30 +160,58 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
     return metrics
 
 
-def compute_momentum_scores(positions: list[dict]) -> list[dict]:
-    """Multi-timeframe momentum score per position, ranked into quartiles.
+# Trading days behind each momentum window.
+_MOM_1M, _MOM_3M, _MOM_6M = 21, 63, 126
+# The price cache holds one year (about 250 closes); the oldest close stands in
+# for "12 months ago" only when the name really has about a year of history.
+_MOM_YEAR_MIN_BARS = 240
 
-    r1m is computed and reported but excluded from the score: academic
-    momentum research ("12-2 momentum", Jegadeesh-Titman) deliberately skips
-    the most recent month, since 1-month returns tend to mean-revert rather
-    than continue, unlike 3-12 month returns.
+
+def _growth(now: float, then: float) -> float | None:
+    return now / then - 1 if then else None
+
+
+def compute_momentum_scores(positions: list[dict], fx_rates: dict[str, float]) -> list[dict]:
+    """Multi-timeframe momentum per position in EUR, ranked into quartiles.
+
+    `r1m`..`r12m` are plain returns up to the latest close; a window the name
+    has no history for is None, never a shorter window in its place. The score
+    weights the 3M, 6M and 12M windows measured up to one month ago: momentum
+    research ("12-2 momentum", Jegadeesh-Titman) skips the most recent month,
+    because 1-month returns tend to revert rather than continue. Only names
+    with about a year of history get a score and a quartile, so every ranked
+    name is measured over the same windows. Scored names come first, strongest
+    first; names with under three months of history are left out.
     """
     scored: list[dict] = []
+    unscored: list[dict] = []
     for p in positions:
         close = market._hist_cache.get(p["ticker"])
-        if close is None or len(close) < 63:
+        if close is None:
             continue
-        vals = close.to_numpy(dtype=float)
-        current = vals[-1]
-        r1m = current / vals[-21] - 1
-        r3m = current / vals[-63] - 1
-        r6m = current / vals[-126] - 1 if len(vals) >= 126 else r3m
-        r12m = current / vals[0] - 1
-        score = 0.35 * r3m + 0.35 * r6m + 0.30 * r12m
-        scored.append(dict(
-            ticker=p["ticker"], name=p["name"], score=score,
-            r1m=r1m, r3m=r3m, r6m=r6m, r12m=r12m,
-        ))
+        eur = _to_eur_close(close, p.get("currency", "USD"), fx_rates).dropna()
+        if len(eur) < _MOM_3M:
+            continue
+        vals = eur.to_numpy(dtype=float)
+        current, month_ago = vals[-1], vals[-_MOM_1M]
+        has_6m = len(vals) >= _MOM_6M
+        has_year = len(vals) >= _MOM_YEAR_MIN_BARS
+        row = dict(
+            ticker=p["ticker"], name=p["name"], score=None, quartile=None,
+            r1m=_growth(current, month_ago),
+            r3m=_growth(current, vals[-_MOM_3M]),
+            r6m=_growth(current, vals[-_MOM_6M]) if has_6m else None,
+            r12m=_growth(current, vals[0]) if has_year else None,
+        )
+        skip_month = [
+            _growth(month_ago, then)
+            for then in (vals[-_MOM_3M], vals[-_MOM_6M] if has_6m else 0.0, vals[0])
+        ] if has_year else [None]
+        if None in skip_month:
+            unscored.append(row)
+            continue
+        row["score"] = 0.35 * skip_month[0] + 0.35 * skip_month[1] + 0.30 * skip_month[2]
+        scored.append(row)
 
     scored.sort(key=lambda d: d["score"])
     n = len(scored)
@@ -191,7 +219,7 @@ def compute_momentum_scores(positions: list[dict]) -> list[dict]:
         d["quartile"] = min(4, i * 4 // n + 1)
 
     scored.sort(key=lambda d: d["score"], reverse=True)
-    return scored
+    return scored + unscored
 
 
 def compute_lookthrough_exposure(positions: list[dict]) -> list[dict]:

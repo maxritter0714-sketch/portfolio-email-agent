@@ -113,17 +113,21 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
         def _fmt_mom(d: dict) -> str:
             return (
                 f"- {d['name']} ({d['ticker']}): Q{d['quartile']} | "
-                f"1M {d['r1m']*100:+.1f}% 3M {d['r3m']*100:+.1f}% "
-                f"6M {d['r6m']*100:+.1f}% 12M {d['r12m']*100:+.1f}%"
+                f"1M {_pct(d['r1m'])} 3M {_pct(d['r3m'])} "
+                f"6M {_pct(d['r6m'])} 12M {_pct(d['r12m'])}"
             )
-        top5 = momentum[:5]
-        bottom5 = momentum[5:][-5:]
-        momentum_text = (
-            "\n\nMOMENTUM (quartile 4 = strongest, 1 = weakest; score weights "
-            "3M/6M/12M returns — 1M is shown for context but excluded from "
-            "the score since short-term moves tend to mean-revert)\n"
-            "Top:\n" + "\n".join(_fmt_mom(d) for d in top5)
-        )
+        # Names without a full year of history have no score and are not ranked.
+        ranked = [d for d in momentum if d["quartile"] is not None]
+        top5 = ranked[:5]
+        bottom5 = ranked[5:][-5:]
+        if top5:
+            momentum_text = (
+                "\n\nMOMENTUM (euro returns up to the latest close; quartile 4 = strongest, "
+                "1 = weakest; the score weights the 3M/6M/12M windows measured up to one "
+                "month ago, since the latest month tends to mean-revert; only holdings with "
+                "a full year of history are ranked)\n"
+                "Top:\n" + "\n".join(_fmt_mom(d) for d in top5)
+            )
         if bottom5:
             momentum_text += "\nBottom:\n" + "\n".join(_fmt_mom(d) for d in bottom5)
     lookthrough_text = ""

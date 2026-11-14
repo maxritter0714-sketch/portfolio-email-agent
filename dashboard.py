@@ -210,6 +210,7 @@ def build_payload(
     history: list[dict],
     risk_free: float,
     today: date,
+    fx_rates: dict[str, float],
     recs: list[dict] | None = None,
     rec_prices: pd.DataFrame | None = None,
 ) -> dict:
@@ -255,7 +256,7 @@ def build_payload(
                                 sp_ret[sp_ret.index > one_year])
     risk_share, port_vol, div_ratio = an.risk_contributions(returns_1y, weights)
     contrib = {k: an.contributions(prices, shares, an.period_start(end, k)) for k in POSITION_PERIODS}
-    momentum = {m["ticker"]: m for m in compute_momentum_scores(positions)}
+    momentum = {m["ticker"]: m for m in compute_momentum_scores(positions, fx_rates)}
 
     def cell(frame: pd.DataFrame, ticker: str, col: str):
         return frame.at[ticker, col] if ticker in frame.index and col in frame.columns else None
@@ -392,6 +393,7 @@ def main() -> None:
         history=_read_history(),
         risk_free=risk_free_rate(),
         today=date.today(),
+        fx_rates=fx_rates,
         recs=recs,
         rec_prices=rec_prices,
     )

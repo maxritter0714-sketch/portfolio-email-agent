@@ -263,7 +263,7 @@ def main() -> None:
         metrics = compute_advanced_metrics(positions, fx_rates)
 
         log.info("Computing momentum scores…")
-        momentum_data = compute_momentum_scores(positions)
+        momentum_data = compute_momentum_scores(positions, fx_rates)
 
         log.info("Computing look-through exposure…")
         lookthrough_data = compute_lookthrough_exposure(positions)

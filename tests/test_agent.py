@@ -439,17 +439,26 @@ def test_trailing_vol_window_larger_than_array_uses_full_array():
 
 # ── compute_momentum_scores ─────────────────────────────────────────────────
 
+def _eur(ticker: str, name: str = "Name") -> dict:
+    return {"ticker": ticker, "name": name, "currency": "EUR"}
+
+
+def _closes(vals) -> pd.Series:
+    return pd.Series(np.asarray(vals, dtype=float),
+                     index=pd.bdate_range(end="2026-11-13", periods=len(vals)))
+
+
 def test_compute_momentum_scores_happy_path(monkeypatch):
-    length = 130
+    length = 250
     vals = np.linspace(50, 300, length)
     vals[0] = 100.0
     vals[length - 126] = 105.0
     vals[length - 63] = 150.0
     vals[length - 21] = 180.0
     vals[-1] = 200.0
-    monkeypatch.setattr(market, "_hist_cache", {"AAA": pd.Series(vals)})
+    monkeypatch.setattr(market, "_hist_cache", {"AAA": _closes(vals)})
 
-    result = compute_momentum_scores([{"ticker": "AAA", "name": "Alpha Co"}])
+    result = compute_momentum_scores([_eur("AAA", "Alpha Co")], {"EUR": 1.0})
 
     assert len(result) == 1
     d = result[0]
@@ -457,49 +466,89 @@ def test_compute_momentum_scores_happy_path(monkeypatch):
     assert d["r3m"] == pytest.approx(200 / 150 - 1)
     assert d["r6m"] == pytest.approx(200 / 105 - 1)
     assert d["r12m"] == pytest.approx(1.0)
-    expected_score = 0.35 * d["r3m"] + 0.35 * d["r6m"] + 0.30 * d["r12m"]
+    # The score stops a month ago: 180, not today's 200.
+    expected_score = 0.35 * (180 / 150 - 1) + 0.35 * (180 / 105 - 1) + 0.30 * (180 / 100 - 1)
     assert d["score"] == pytest.approx(expected_score)
+
+
+def test_compute_momentum_score_ignores_a_jump_in_the_last_month(monkeypatch):
+    flat = np.full(250, 100.0)
+    jumped = flat.copy()
+    jumped[-10:] = 150.0
+    monkeypatch.setattr(market, "_hist_cache", {"FLAT": _closes(flat), "JUMP": _closes(jumped)})
+
+    rows = {d["ticker"]: d for d in compute_momentum_scores([_eur("FLAT"), _eur("JUMP")], {"EUR": 1.0})}
+
+    assert rows["JUMP"]["r1m"] == pytest.approx(0.5)
+    assert rows["JUMP"]["score"] == pytest.approx(rows["FLAT"]["score"]) == pytest.approx(0.0)
+
 
 def test_compute_momentum_scores_skips_missing_from_cache(monkeypatch):
     monkeypatch.setattr(market, "_hist_cache", {})
-    result = compute_momentum_scores([{"ticker": "ZZZ", "name": "Zeta"}])
-    assert result == []
+    assert compute_momentum_scores([_eur("ZZZ")], {"EUR": 1.0}) == []
+
 
 def test_compute_momentum_scores_skips_short_history(monkeypatch):
-    short_series = pd.Series(np.linspace(100, 110, 50))  # < 63 days
-    monkeypatch.setattr(market, "_hist_cache", {"AAA": short_series})
-    result = compute_momentum_scores([{"ticker": "AAA", "name": "Alpha"}])
-    assert result == []
+    monkeypatch.setattr(market, "_hist_cache", {"AAA": _closes(np.linspace(100, 110, 50))})
+    assert compute_momentum_scores([_eur("AAA")], {"EUR": 1.0}) == []
 
-def test_compute_momentum_scores_r6m_falls_back_to_r3m_when_under_126_days(monkeypatch):
-    vals = np.linspace(100, 150, 90)  # >= 63, < 126
-    monkeypatch.setattr(market, "_hist_cache", {"AAA": pd.Series(vals)})
-    result = compute_momentum_scores([{"ticker": "AAA", "name": "Alpha"}])
-    d = result[0]
-    assert d["r6m"] == pytest.approx(d["r3m"])
+
+def test_compute_momentum_scores_short_history_has_no_long_windows_and_no_rank(monkeypatch):
+    cache = {"NEW": _closes(np.linspace(100, 150, 90)), "OLD": _closes(np.linspace(100, 150, 250))}
+    monkeypatch.setattr(market, "_hist_cache", cache)
+
+    result = compute_momentum_scores([_eur("NEW"), _eur("OLD")], {"EUR": 1.0})
+
+    assert [d["ticker"] for d in result] == ["OLD", "NEW"]
+    new = result[1]
+    assert new["r3m"] is not None and new["r6m"] is None and new["r12m"] is None
+    assert new["score"] is None and new["quartile"] is None
+    assert result[0]["quartile"] == 1
+
+
+def test_compute_momentum_scores_measure_a_dollar_holding_in_euro(monkeypatch):
+    idx = pd.bdate_range(end="2026-11-13", periods=250)
+    flat_usd = pd.Series(100.0, index=idx)
+    eur_per_usd = pd.Series(np.linspace(1.0, 0.8, 250), index=idx)  # the dollar lost 20%
+    monkeypatch.setattr(market, "_hist_cache", {"USD1": flat_usd})
+    monkeypatch.setattr(market, "_fx_hist_cache", {"USD": eur_per_usd})
+
+    d = compute_momentum_scores([{"ticker": "USD1", "name": "Dollar Co", "currency": "USD"}],
+                                {"USD": 0.8})[0]
+
+    assert d["r12m"] == pytest.approx(-0.2)
+
 
 def test_compute_momentum_scores_quartiles_span_1_to_4_and_sort_descending(monkeypatch):
-    def make_series(growth: float, length: int = 130) -> pd.Series:
-        start, end = 100.0, 100.0 * (1 + growth)
-        vals = np.full(length, start)
-        vals[0] = start
-        vals[length - 126] = end
-        vals[length - 63] = end
-        vals[length - 21] = end
-        vals[-1] = end
-        return pd.Series(vals)
+    def make_series(growth: float, length: int = 250) -> pd.Series:
+        vals = np.full(length, 100.0)
+        vals[length - 126:] = 100.0 * (1 + growth)
+        return _closes(vals)
 
     growths = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
     cache = {f"T{i}": make_series(g) for i, g in enumerate(growths)}
-    positions = [{"ticker": f"T{i}", "name": f"Ticker {i}"} for i in range(8)]
+    positions = [_eur(f"T{i}", f"Ticker {i}") for i in range(8)]
     monkeypatch.setattr(market, "_hist_cache", cache)
 
-    result = compute_momentum_scores(positions)
+    result = compute_momentum_scores(positions, {"EUR": 1.0})
 
     assert [d["ticker"] for d in result] == [f"T{i}" for i in reversed(range(8))]
     expected_quartiles = {f"T{i}": i // 2 + 1 for i in range(8)}
     for d in result:
         assert d["quartile"] == expected_quartiles[d["ticker"]]
+
+
+def test_prompt_momentum_block_ranks_only_scored_names():
+    from claude_report import _build_user_context
+    ranked = dict(ticker="OLD", name="Old Co", score=0.1, quartile=1,
+                  r1m=0.01, r3m=0.02, r6m=0.03, r12m=0.04)
+    unranked = dict(ticker="NEW", name="New Co", score=None, quartile=None,
+                    r1m=0.01, r3m=0.02, r6m=None, r12m=None)
+    summary = dict(total_value_eur=1000.0, total_pl_eur=0.0, total_pl_pct=0.0, weekly_pct=0.0,
+                   fortnight_pct=0.0, monthly_pct=0.0, ytd_pct=0.0)
+    text = _build_user_context([], summary, [], [], [], {}, momentum=[ranked, unranked])
+    assert "Old Co (OLD): Q1 | 1M +1.0% 3M +2.0% 6M +3.0% 12M +4.0%" in text
+    assert "New Co" not in text
 
 
 # ── compute_lookthrough_exposure ────────────────────────────────────────────
