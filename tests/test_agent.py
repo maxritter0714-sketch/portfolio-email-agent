@@ -1260,3 +1260,20 @@ def test_portfolio_return_skips_total_loss_and_empty():
     positions = [dict(value_eur=0.0, ytd_pct=-100.0), dict(value_eur=110.0, ytd_pct=10.0)]
     assert market.portfolio_return(positions, "ytd_pct") == pytest.approx(10.0)
     assert market.portfolio_return([], "ytd_pct") == 0.0
+
+
+# ── Risk panel captions ───────────────────────────────────────────────────────
+
+def test_risk_panel_hidden_without_metrics():
+    html_out = _minimal_email(metrics={})
+    assert "Primary metric strip" not in html_out and ">Sharpe<" not in html_out
+    assert "Risk figures are left out" in html_out
+
+
+def test_risk_panel_says_it_describes_todays_holdings_and_marks_missing_values():
+    html_out = _minimal_email(metrics={"sharpe": 1.0, "beta": None, "alpha": 0.02, "hhi": 0.05})
+    assert "today's holdings over the past year, not your track record" in html_out
+    assert "n/a" in html_out and "Not enough data" in html_out
+    assert "2.0%/yr above what beta explains" in html_out
+    assert "Low position concentration" in html_out
+    assert "Well diversified" not in html_out and "Outperforms" not in html_out

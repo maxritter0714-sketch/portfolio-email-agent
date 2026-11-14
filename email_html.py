@@ -29,16 +29,18 @@ def interp_sortino(v):
 
 
 def interp_beta(v):
-    if v < 0.5: return "Much less volatile than market"
-    if v < 0.8: return "Less volatile than the market"
+    if v < 0.5: return "Moves far less than the market"
+    if v < 0.8: return "Moves less than the market"
     if v < 1.2: return "Moves in line with the market"
-    if v < 1.5: return "More volatile than the market"
-    return "Significantly amplifies market moves"
+    if v < 1.5: return "Moves more than the market"
+    return "Amplifies market moves"
 
 
 def interp_alpha(v_pct):
-    direction = "Out" if v_pct >= 0 else "Under"
-    return f"{direction}performs the market by {abs(v_pct):.1f}%/yr risk-adjusted"
+    if abs(v_pct) < 0.05:
+        return "In line with what beta explains"
+    side = "above" if v_pct >= 0 else "below"
+    return f"{abs(v_pct):.1f}%/yr {side} what beta explains"
 
 
 def interp_vol(v):
@@ -76,10 +78,11 @@ def interp_corr(v):
 
 
 def interp_hhi(v):
-    if v < 0.10: return "Well diversified"
-    if v < 0.18: return "Moderately concentrated"
+    # Position concentration only: says nothing about sector or factor risk.
+    if v < 0.10: return "Low position concentration"
+    if v < 0.18: return "Moderate position concentration"
     if v < 0.25: return "Top positions dominate"
-    return "Highly concentrated"
+    return "High position concentration"
 
 
 def interp_wr(v):
@@ -543,7 +546,10 @@ def build_html_email(
         value = metrics.get(key)
         if value is None:
             return label, "n/a", "Not enough data"
-        return label, f"{value * scale:{spec}}{suffix}", interp(value)
+        text = f"{value * scale:{spec}}"
+        if float(text) == 0:
+            text = f"{0.0:{spec.lstrip('+')}}"  # never "-0.0" or "+0.0"
+        return label, f"{text}{suffix}", interp(value)
 
     primary_data = [
         tile("Sharpe", "sharpe", ".2f", interp_sharpe),
@@ -602,6 +608,26 @@ def build_html_email(
                 f'</td>'
             )
         sec_rows += "</tr>"
+
+    # No figures, no panel: zeros with a verdict under them would be invented data.
+    metrics_html = ""
+    if metrics:
+        metrics_html = f"""<div class="sect-pad-metrics" style="padding:0 40px 6px">
+  <div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;color:{TEXT_SECONDARY};line-height:1.4">Risk figures: today's holdings over the past year, not your track record.</div>
+</div>
+
+<!-- Primary metric strip -->
+<div class="sect-pad-metrics" style="padding:8px 40px">
+  <table class="metric-p-table" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid {TEXT_PRIMARY};border-bottom:1px solid {TEXT_PRIMARY}">
+    <tr class="metric-p-row">{primary_cells}</tr>
+  </table>
+</div>
+
+<!-- Secondary metric strip -->
+<div class="sect-pad-sec" style="padding:4px 40px 24px">
+  <table class="metric-s-table" width="100%" cellpadding="0" cellspacing="0">{sec_rows}</table>
+</div>
+"""
 
     # ── Positions table ───────────────────────────────────────────────────────
     def _th(label: str, align: str = "left", cls: str = "") -> str:
@@ -781,6 +807,8 @@ def build_html_email(
             for u in unmapped
         )
         notes_parts.append(f"Not in this report (ISIN not mapped to a ticker): {missing}.")
+    if not metrics:
+        notes_parts.append("Risk figures are left out: not enough price history to compute them.")
     if metrics:
         notes_parts.append(
             "Benchmark returns are US-listed ETFs (SPY, QQQ, URTH) in euros, dividends included. "
@@ -879,18 +907,7 @@ def build_html_email(
   <p class="headline-p" style="font-family:Georgia,serif;font-size:22px;line-height:1.45;color:{TEXT_PRIMARY};margin:0">{headline_html}</p>
 </div>
 
-<!-- Primary metric strip -->
-<div class="sect-pad-metrics" style="padding:8px 40px">
-  <table class="metric-p-table" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid {TEXT_PRIMARY};border-bottom:1px solid {TEXT_PRIMARY}">
-    <tr class="metric-p-row">{primary_cells}</tr>
-  </table>
-</div>
-
-<!-- Secondary metric strip -->
-<div class="sect-pad-sec" style="padding:4px 40px 24px">
-  <table class="metric-s-table" width="100%" cellpadding="0" cellspacing="0">{sec_rows}</table>
-</div>
-
+{metrics_html}
 <!-- Section I. Positions -->
 <div class="sect-pad" style="padding:24px 40px">
   {_sect_header("I", "Positions")}
