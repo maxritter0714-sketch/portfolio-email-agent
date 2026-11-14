@@ -538,11 +538,18 @@ def build_html_email(
     headline_html = _emphasize_numbers(headline)
 
     # ── Primary metric strip ──────────────────────────────────────────────────
+    def tile(label: str, key: str, spec: str, interp, scale: float = 1.0, suffix: str = "") -> tuple[str, str, str]:
+        """(label, value, caption) for one risk figure; "n/a" when it could not be computed."""
+        value = metrics.get(key)
+        if value is None:
+            return label, "n/a", "Not enough data"
+        return label, f"{value * scale:{spec}}{suffix}", interp(value)
+
     primary_data = [
-        ("Sharpe", f"{metrics.get('sharpe', 0):.2f}", interp_sharpe(metrics.get("sharpe", 0))),
-        ("Beta",   f"{metrics.get('beta', 0):.2f}",   interp_beta(metrics.get("beta", 0))),
-        ("Alpha",  f"{metrics.get('alpha', 0)*100:+.1f}%", interp_alpha(metrics.get("alpha", 0)*100)),
-        ("Max DD", f"{metrics.get('max_drawdown', 0)*100:.1f}%", interp_dd(metrics.get("max_drawdown", 0))),
+        tile("Sharpe", "sharpe", ".2f", interp_sharpe),
+        tile("Beta", "beta", ".2f", interp_beta),
+        tile("Alpha", "alpha", "+.1f", lambda v: interp_alpha(v * 100), 100, "%"),
+        tile("Max DD", "max_drawdown", ".1f", interp_dd, 100, "%"),
     ]
     primary_cells = ""
     for i, (label, value, interp) in enumerate(primary_data):
@@ -561,13 +568,13 @@ def build_html_email(
 
     # ── Secondary metric strip (4 across) ─────────────────────────────────────
     secondary = [
-        ("Sortino",    f"{metrics.get('sortino', 0):.2f}",       interp_sortino(metrics.get("sortino", 0))),
-        ("Calmar",     f"{metrics.get('calmar', 0):.2f}",        interp_calmar(metrics.get("calmar", 0))),
-        ("Volatility", f"{metrics.get('volatility', 0)*100:.1f}%", interp_vol(metrics.get("volatility", 0))),
-        ("VaR 95%",    f"{metrics.get('var_95', 0)*100:.2f}%",   interp_var(metrics.get("var_95", 0))),
-        ("Correlation", f"{metrics.get('correlation', 0):.2f}",  interp_corr(metrics.get("correlation", 0))),
-        ("HHI",        f"{metrics.get('hhi', 0):.3f}",           interp_hhi(metrics.get("hhi", 0))),
-        ("Above cost", f"{metrics.get('win_rate', 0):.0f}%",     interp_wr(metrics.get("win_rate", 0))),
+        tile("Sortino", "sortino", ".2f", interp_sortino),
+        tile("Calmar", "calmar", ".2f", interp_calmar),
+        tile("Volatility", "volatility", ".1f", interp_vol, 100, "%"),
+        tile("VaR 95%", "var_95", ".2f", interp_var, 100, "%"),
+        tile("Correlation", "correlation", ".2f", interp_corr),
+        tile("HHI", "hhi", ".3f", interp_hhi),
+        tile("Above cost", "win_rate", ".0f", interp_wr, 1.0, "%"),
         ("Div Yield (TTM)", f"{summary.get('portfolio_yield_pct', 0):.2f}%", interp_yield(summary.get("portfolio_yield_pct", 0))),
     ]
     # Pad to multiple of 4
@@ -776,7 +783,8 @@ def build_html_email(
         notes_parts.append(f"Not in this report (ISIN not mapped to a ticker): {missing}.")
     if metrics:
         notes_parts.append(
-            "Beta, alpha, and correlation are versus the S&P 500 in euro terms. "
+            "Benchmark returns are US-listed ETFs (SPY, QQQ, URTH) in euros, dividends included. "
+            "Beta, alpha, and correlation are versus the S&amp;P 500 ETF in euro terms (SXR8 on Xetra). "
             "Beta and correlation use weekly returns, because Xetra and New York "
             "close at different times."
         )

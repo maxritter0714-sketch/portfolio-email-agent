@@ -52,6 +52,12 @@ def buy_hold_returns(prices: pd.DataFrame, shares: pd.Series) -> tuple[pd.Series
     return ret, coverage
 
 
+def returns_on_calendar(prices: pd.Series | pd.DataFrame, calendar: pd.Index) -> pd.Series | pd.DataFrame:
+    """Daily returns of `prices` on another calendar; its own holidays come out as 0 %."""
+    aligned = prices.reindex(prices.index.union(calendar)).ffill().reindex(calendar)
+    return aligned.pct_change()
+
+
 def index_from_returns(ret: pd.Series, base: float = 100.0) -> pd.Series:
     return (1.0 + ret).cumprod() * base
 

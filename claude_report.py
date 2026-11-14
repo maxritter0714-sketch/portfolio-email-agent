@@ -58,6 +58,12 @@ def _value_vs_jan_line(summary: dict) -> str:
     return line + _lifetime_line(summary)
 
 
+def _metric(metrics: dict, key: str, spec: str = ".2f", scale: float = 1.0) -> str:
+    """One risk figure for the prompt; "n/a" when it could not be computed."""
+    value = metrics.get(key)
+    return "n/a" if value is None else format(value * scale, spec)
+
+
 # ── Claude analysis ───────────────────────────────────────────────────────────
 def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, conviction: dict | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None, events: list[dict] | None = None, allocation: list[dict] | None = None, ref_prices: dict[str, float] | None = None) -> str:
     positions_text = "\n".join(
@@ -81,26 +87,24 @@ def _build_user_context(positions, summary, benchmarks, port_news, gen_news, met
     )
     metrics_text = ""
     if metrics:
-        beta_13w_str = f"{metrics['beta_13w']:.2f}" if metrics.get("beta_13w") is not None else "n/a"
-        beta_26w_str = f"{metrics['beta_26w']:.2f}" if metrics.get("beta_26w") is not None else "n/a"
+        def m(key: str, spec: str = ".2f", scale: float = 1.0) -> str:
+            return _metric(metrics, key, spec, scale)
+
         metrics_text = (
-            f"\nADVANCED METRICS\n"
-            f"Sharpe Ratio: {metrics.get('sharpe', 0):.2f} | "
-            f"Sortino Ratio: {metrics.get('sortino', 0):.2f}\n"
-            f"Beta vs S&P 500 (EUR, weekly returns): {metrics.get('beta', 0):.2f} | "
-            f"Alpha (annualized, vs S&P 500 in EUR): {metrics.get('alpha', 0)*100:+.2f}%\n"
-            f"Annualized Volatility: {metrics.get('volatility', 0)*100:.1f}% | "
-            f"Max Drawdown: {metrics.get('max_drawdown', 0)*100:.1f}%\n"
-            f"Calmar Ratio: {metrics.get('calmar', 0):.2f} | "
-            f"VaR 95% (1-day): {metrics.get('var_95', 0)*100:.2f}%\n"
-            f"Correlation to S&P 500 (EUR): {metrics.get('correlation', 0):.2f} | "
-            f"HHI Concentration: {metrics.get('hhi', 0):.4f}\n"
-            f"Above cost (share of names with price above average buy): "
-            f"{metrics.get('win_rate', 0):.1f}%\n"
-            f"Rolling Sharpe (90d): {metrics.get('sharpe_90d', 0):.2f} | "
-            f"Rolling Beta (13w/26w, weekly returns): {beta_13w_str} / {beta_26w_str}\n"
-            f"Rolling Volatility (30d, annualized): {metrics.get('vol_30d', 0)*100:.1f}% | "
-            f"CVaR 95% (Expected Shortfall, full 1Y period — not rolling): {metrics.get('cvar_95', 0)*100:.2f}%"
+            f"\nADVANCED METRICS (today's holdings held unchanged over the last year)\n"
+            f"Sharpe Ratio: {m('sharpe')} | Sortino Ratio: {m('sortino')}\n"
+            f"Beta vs S&P 500 ETF (EUR, weekly returns): {m('beta')} | "
+            f"Alpha (annualized, vs S&P 500 ETF in EUR): {m('alpha', '+.2f', 100)}%\n"
+            f"Annualized Volatility: {m('volatility', '.1f', 100)}% | "
+            f"Max Drawdown: {m('max_drawdown', '.1f', 100)}%\n"
+            f"Calmar Ratio: {m('calmar')} | VaR 95% (1-day): {m('var_95', '.2f', 100)}%\n"
+            f"Correlation to S&P 500 ETF (EUR): {m('correlation')} | "
+            f"HHI Concentration: {m('hhi', '.4f')}\n"
+            f"Above cost (share of names with price above average buy): {m('win_rate', '.1f')}%\n"
+            f"Rolling Sharpe (90d): {m('sharpe_90d')} | "
+            f"Rolling Beta (13w/26w, weekly returns): {m('beta_13w')} / {m('beta_26w')}\n"
+            f"Rolling Volatility (30d, annualized): {m('vol_30d', '.1f', 100)}% | "
+            f"CVaR 95% (Expected Shortfall, full 1Y period — not rolling): {m('cvar_95', '.2f', 100)}%"
         )
     momentum_text = ""
     if momentum:
@@ -249,7 +253,7 @@ _PROMPT_STRUCTURE = (
     "mention it as a factual data point — not as a problem to fix. Whether more "
     "or hidden exposure to a given name is desirable depends on the reader's own "
     "view of that company, not on the metric itself.\n"
-    "## (2) Benchmark Comparison — how the portfolio did vs S&P 500, Nasdaq, and MSCI "
+    "## (2) Benchmark Comparison — how the portfolio did vs S&P 500, Nasdaq 100, and MSCI "
     "World. ALWAYS cite all three benchmarks — do not omit one because it makes the "
     "comparison look worse. ALWAYS compare the same time period: YTD vs YTD, or "
     "fortnight vs fortnight — never mix since-inception portfolio returns against "
@@ -279,7 +283,7 @@ _PROMPT_FORMATTING = (
     "Never use Markdown table syntax (pipe characters and dashes). "
     "Never use bullet points (- or *) — use plain paragraphs. "
     "When presenting benchmark comparisons or tabular data, write it as flowing prose sentences. "
-    "Example: 'The S&P 500 returned +8.35% YTD, Nasdaq +11.42%, and MSCI World +8.48% — "
+    "Example: 'The S&P 500 returned +8.35% YTD, Nasdaq 100 +11.42%, and MSCI World +8.48% — "
     "all well below this portfolio\\'s +23.07%.' "
     "Do not use any HTML tags. "
     "All output must be plain text with Markdown bold (**text**) only. "
@@ -297,9 +301,12 @@ _PROMPT_FORMATTING = (
     "'formally establish' outperformance. State the figure, note it is based on limited "
     "history, and let the reader draw their own conclusion. "
     "YTD for holdings and the portfolio masthead is a weighted euro price return of "
-    "current names this calendar year. Benchmark 1W/2W/1M/YTD figures are also euro "
-    "returns (index converted at daily EUR FX), so portfolio and benchmark figures "
-    "compare like-for-like. If a book-value-vs-January figure is present, "
+    "current names this calendar year. Benchmark 1W/2W/1M/YTD figures are euro returns "
+    "of US-listed ETFs tracking each index (SPY, QQQ, URTH), dividends included, so "
+    "portfolio and benchmark figures compare like-for-like. Beta, alpha and correlation "
+    "are measured against the S&P 500 ETF on Xetra. The ADVANCED METRICS describe today's holdings "
+    "held unchanged over the last year, not the owner's actual track record. "
+    "If a book-value-vs-January figure is present, "
     "it includes deposits and withdrawals and is not a time-weighted return; do not "
     "call it YTD performance."
 )
@@ -374,9 +381,9 @@ def call_claude_headline(summary: dict, benchmarks: list[dict], metrics: dict) -
     metrics_line = ""
     if metrics:
         metrics_line = (
-            f"Sharpe {metrics.get('sharpe', 0):.2f}, "
-            f"Alpha {metrics.get('alpha', 0)*100:+.2f}%, "
-            f"Beta {metrics.get('beta', 0):.2f}"
+            f"Sharpe {_metric(metrics, 'sharpe')}, "
+            f"Alpha {_metric(metrics, 'alpha', '+.2f', 100)}%, "
+            f"Beta {_metric(metrics, 'beta')}"
         )
     context = (
         f"Portfolio weekly: {summary['weekly_pct']:+.2f}%\n"

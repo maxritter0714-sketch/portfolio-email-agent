@@ -1,6 +1,6 @@
 ﻿# Portfolio Email Agent
 
-A fortnightly portfolio briefing in your inbox. Every other Saturday it values your holdings in EUR, compares them with the S&P 500, Nasdaq and MSCI World, picks the news that matters for what you own, and has Claude write the analysis and three to five concrete suggestions. An optional local dashboard goes deeper on the same data.
+A fortnightly portfolio briefing in your inbox. Every other Saturday it values your holdings in EUR, compares them with S&P 500, Nasdaq 100 and MSCI World ETFs, picks the news that matters for what you own, and has Claude write the analysis and three to five concrete suggestions. An optional local dashboard goes deeper on the same data.
 
 Built with Python · Claude API · yfinance · NewsAPI · Plotly · GitHub Actions · pytest
 

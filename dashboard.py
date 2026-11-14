@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 import analytics as an
 from claude_report import load_conviction, load_recommendations
 from market import (
+    BENCHMARK_ETFS,
     _read_history,
     _to_eur_close,
     currency_exposure,
@@ -52,11 +53,10 @@ from theme import (
 log = logging.getLogger(__name__)
 
 HISTORY_PERIOD = "7y"
-# Benchmarks are the accumulating Xetra ETFs a German saver would actually buy: in EUR,
-# net of fund fees and withholding tax, so they compare fairly with the real portfolio.
+# key -> (Yahoo symbol, label, currency), from the benchmark ETFs shared with the email.
 BENCHMARKS = {
-    "sp500": ("SXR8.DE", "S&P 500 (SXR8)", "EUR"),
-    "world": ("EUNL.DE", "MSCI World (EUNL)", "EUR"),
+    key: (symbol, f"{name} ({symbol.split('.')[0]})", "EUR")
+    for key, (symbol, name) in BENCHMARK_ETFS.items()
 }
 # The backtest starts once this share of today's value was already listed.
 MIN_COVERAGE = 0.5
@@ -234,8 +234,7 @@ def build_payload(
     coverage = coverage[coverage.index >= start]
 
     # Benchmarks on the portfolio calendar (carried over their holidays).
-    bench = bench_prices.reindex(bench_prices.index.union(prices.index)).ffill().reindex(prices.index)
-    bench_ret = bench.pct_change().reindex(port_ret.index).fillna(0.0)
+    bench_ret = an.returns_on_calendar(bench_prices, prices.index).reindex(port_ret.index).fillna(0.0)
     sp_ret, world_ret = bench_ret["sp500"], bench_ret["world"]
 
     indices = {

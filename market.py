@@ -29,11 +29,26 @@ from theme import (
 log = logging.getLogger(__name__)
 
 REQUIRED_COLUMNS = {"ticker", "name", "shares", "avg_buy_price"}
+# Return table in the email (1W/2W/1M/YTD): US-listed ETFs converted to EUR.
+# They include dividends and close in New York like most holdings; a Xetra ETF
+# closes at 17:35 CET and can sit a point or more off over a single week.
 BENCHMARKS = [
-    ("^GSPC", "S&P 500"),
-    ("^IXIC", "Nasdaq"),
+    ("SPY", "S&P 500"),
+    ("QQQ", "Nasdaq 100"),
     ("URTH", "MSCI World"),
 ]
+# Risk figures in the email and everything in the dashboard: accumulating
+# iShares ETFs on Xetra, in EUR, net of fund fees and withholding tax, i.e. what
+# a German saver could hold instead. Beta, alpha and correlation use weekly
+# returns, which the earlier close does not disturb.
+BENCHMARK_ETFS: dict[str, tuple[str, str]] = {
+    "sp500": ("SXR8.DE", "S&P 500"),
+    "world": ("EUNL.DE", "MSCI World"),
+}
+# The S&P 500 price index (no dividends) only dates the history rows and feeds
+# the history chart: stored index levels stay comparable over time, which
+# dividend-adjusted ETF closes do not.
+SP500_INDEX = "^GSPC"
 
 _hist_cache: dict = {}
 
@@ -552,6 +567,22 @@ def fetch_portfolio_data(
     return positions, summary, unknown_fx, skipped
 
 
+def sp500_index_close() -> pd.Series | None:
+    """Recent closes of the S&P 500 price index (cached), or None if Yahoo has none."""
+    cached = _hist_cache.get(SP500_INDEX)
+    if cached is not None:
+        return cached
+    try:
+        close = yf.Ticker(SP500_INDEX).history(period="5d")["Close"].dropna()
+    except Exception as exc:
+        log.warning("Could not fetch %s (%s)", SP500_INDEX, exc)
+        return None
+    if close.empty:
+        return None
+    _hist_cache[SP500_INDEX] = close
+    return close
+
+
 def fetch_benchmarks(fx_rates: dict[str, float]) -> list[dict]:
     """Benchmark returns in EUR, so they compare like-for-like with the portfolio."""
     results = []
@@ -741,7 +772,7 @@ def append_history(
             log.info("History: %s entry for %s already exists — skipping.", source, today_str)
             return False
 
-    sp500_series = _hist_cache.get("^GSPC")
+    sp500_series = _hist_cache.get(SP500_INDEX)
     if sp500_series is None or sp500_series.empty:
         log.warning("S&P 500 not in cache — history row will have sp500_close=0")
         sp500_close = 0.0
@@ -813,7 +844,8 @@ def generate_history_chart() -> str | None:
     ax.plot(dates, port_idx, color=DARK_GOLD, linewidth=2,
             label="Portfolio", marker="o" if few else None, markersize=4)
     ax.plot(dates, sp_idx, color=NAVY, linewidth=1.5,
-            linestyle="--", label="S&P 500 (EUR)", marker="o" if few else None, markersize=3)
+            linestyle="--", label="S&P 500 price index (EUR)", marker="o" if few else None,
+            markersize=3)
     ax.axhline(100, color=TEXT_SECONDARY, linewidth=0.5, linestyle=":")
     locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
     ax.xaxis.set_major_locator(locator)
@@ -822,7 +854,7 @@ def generate_history_chart() -> str | None:
     plt.setp(ax.get_xticklabels(), fontsize=7, color=TEXT_PRIMARY, fontfamily="serif",
              rotation=45, ha="right")
     ax.tick_params(axis="y", labelsize=8, colors=TEXT_PRIMARY)
-    ax.set_title("Price return in EUR, deposits excluded, indexed to 100 at start", fontsize=8,
+    ax.set_title("EUR, deposits excluded, start = 100; the S&P 500 line excludes dividends", fontsize=8,
                  color=TEXT_SECONDARY, fontfamily="serif", pad=6)
     ax.set_ylabel("Indexed (start = 100)", fontsize=8, color=TEXT_SECONDARY,
                   fontfamily="serif")

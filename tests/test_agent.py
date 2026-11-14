@@ -773,20 +773,39 @@ def test_to_eur_close_gbx_converts_pence_then_gbp_fx(monkeypatch):
     assert list(out) == pytest.approx([12.0, 13.2])
 
 
+SP500_ETF = market.BENCHMARK_ETFS["sp500"][0]
+WORLD_ETF = market.BENCHMARK_ETFS["world"][0]
+
+
+def _random_walk(idx, seed: int, sigma: float = 0.01) -> pd.Series:
+    rets = np.random.default_rng(seed).normal(0.0, sigma, len(idx))
+    return pd.Series(100.0 * np.cumprod(1.0 + rets), index=idx)
+
+
 def test_beta_near_zero_when_usd_holding_is_flat_in_eur(monkeypatch):
     n = 80
     idx = pd.bdate_range("2025-01-02", periods=n)
     fx = pd.Series(np.linspace(0.8, 1.2, n), index=idx)
     usd_stock = 100.0 / fx
-    spx = pd.Series(100.0, index=idx)
+    bench = _random_walk(idx, seed=3)
     monkeypatch.setattr(market, "_fx_hist_cache", {"USD": fx})
-    monkeypatch.setattr(market, "_hist_cache", {"AAA": usd_stock, "^GSPC": spx})
+    monkeypatch.setattr(market, "_hist_cache", {"AAA": usd_stock, SP500_ETF: bench, WORLD_ETF: bench})
     positions = [{
         "ticker": "AAA", "name": "Alpha", "value_eur": 1000.0,
         "pl_pct": 1.0, "currency": "USD",
     }]
     result = compute_advanced_metrics(positions, {"USD": 1.0, "EUR": 1.0})
     assert result["beta"] == pytest.approx(0.0, abs=0.05)
+
+
+def test_beta_is_none_not_one_when_the_benchmark_never_moves(monkeypatch):
+    idx = pd.bdate_range("2025-01-02", periods=80)
+    flat = pd.Series(100.0, index=idx)
+    monkeypatch.setattr(market, "_hist_cache", {"AAA": _random_walk(idx, seed=5), SP500_ETF: flat, WORLD_ETF: flat})
+    positions = [{"ticker": "AAA", "name": "Alpha", "value_eur": 1000.0, "pl_pct": 1.0, "currency": "EUR"}]
+    result = compute_advanced_metrics(positions, {"EUR": 1.0})
+    assert result["beta"] is None and result["alpha"] is None
+    assert result["sharpe"] is not None
 
 
 def test_beta_uses_weekly_returns_so_one_day_lag_does_not_hide_comovement(monkeypatch):
@@ -799,8 +818,7 @@ def test_beta_uses_weekly_returns_so_one_day_lag_does_not_hide_comovement(monkey
     spx_ret = pd.Series(rng.normal(0.0, 0.01, n), index=idx)
     spx = 100.0 * (1.0 + spx_ret).cumprod()
     lagged = 100.0 * (1.0 + spx_ret.shift(1).fillna(0.0)).cumprod()
-    monkeypatch.setattr(market, "_fx_hist_cache", {"USD": pd.Series(1.0, index=idx)})
-    monkeypatch.setattr(market, "_hist_cache", {"LAG": lagged, "^GSPC": spx})
+    monkeypatch.setattr(market, "_hist_cache", {"LAG": lagged, SP500_ETF: spx, WORLD_ETF: spx})
     positions = [{
         "ticker": "LAG", "name": "Lagged", "value_eur": 1000.0,
         "pl_pct": 1.0, "currency": "EUR",
@@ -811,9 +829,34 @@ def test_beta_uses_weekly_returns_so_one_day_lag_does_not_hide_comovement(monkey
     assert result["beta_13w"] is not None and result["beta_26w"] is not None
 
 
+def test_email_metrics_equal_the_dashboard_engine(monkeypatch):
+    # Same prices in, same figures out: the email must not drift from analytics.risk_stats.
+    import analytics as an
+
+    idx = pd.bdate_range("2025-01-02", periods=200)
+    a, b = _random_walk(idx, seed=11, sigma=0.02), _random_walk(idx, seed=12, sigma=0.015)
+    sp, world = _random_walk(idx, seed=13), _random_walk(idx, seed=14)
+    monkeypatch.setattr(market, "_hist_cache", {"AAA": a, "BBB": b, SP500_ETF: sp, WORLD_ETF: world})
+    shares = {"AAA": 3.0, "BBB": 5.0}
+    positions = [
+        {"ticker": t, "name": t, "value_eur": shares[t] * float(px.iloc[-1]), "pl_pct": 1.0, "currency": "EUR"}
+        for t, px in (("AAA", a), ("BBB", b))
+    ]
+    result = compute_advanced_metrics(positions, {"EUR": 1.0})
+
+    port_ret, _ = an.buy_hold_returns(pd.DataFrame({"AAA": a, "BBB": b}), pd.Series(shares))
+    expected = an.risk_stats(port_ret, sp.pct_change().dropna(), world.pct_change().dropna(), risk_free_rate())
+    for email_key, engine_key in [
+        ("sharpe", "sharpe"), ("sortino", "sortino"), ("beta", "beta"), ("alpha", "alpha"),
+        ("volatility", "volatility"), ("max_drawdown", "max_dd"), ("calmar", "calmar"),
+        ("var_95", "var_95"), ("cvar_95", "cvar_95"), ("correlation", "correlation"),
+    ]:
+        assert result[email_key] == pytest.approx(expected[engine_key]), email_key
+
+
 def test_metrics_eur_benchmark_note_in_footer():
     html_out = _minimal_email(metrics={"sharpe": 1.0, "beta": 1.0, "alpha": 0.0})
-    assert "S&P 500 in euro terms" in html_out
+    assert "S&amp;P 500 ETF in euro terms" in html_out
     assert "euro returns" in html_out
     assert "Above cost" in html_out
 
@@ -978,7 +1021,7 @@ def test_last_trading_day_falls_back_without_prices():
 
 def test_append_history_saturday_run_skips_fridays_snapshot(tmp_path, monkeypatch):
     monkeypatch.setattr(market, "_HISTORY_PATH", tmp_path / "history.csv")
-    monkeypatch.setattr(market, "_hist_cache", {"^GSPC": pd.Series([7410.0])})
+    monkeypatch.setattr(market, "_hist_cache", {market.SP500_INDEX: pd.Series([7410.0])})
     friday = real_date(2026, 11, 13)
     summary = {"total_value_eur": 32000.0}
     assert market.append_history(summary, 49, port_index=101.0, sp500_eur=6600.0, day=friday) is True

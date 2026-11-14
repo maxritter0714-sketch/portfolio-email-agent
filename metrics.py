@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 
 import numpy as np
@@ -9,12 +10,13 @@ import pandas as pd
 import yfinance as yf
 
 import market
-from analytics import to_weekly
+from analytics import TDAYS, buy_hold_returns, returns_on_calendar, risk_stats, to_weekly
 from market import _to_eur_close
 
 log = logging.getLogger(__name__)
 
 DEFAULT_RISK_FREE = 0.035
+MIN_HISTORY_DAYS = 60  # a holding with less history is left out of the risk figures
 
 
 def risk_free_rate() -> float:
@@ -66,9 +68,32 @@ def _trailing_vol(pr: np.ndarray, window: int, tdays: int) -> float:
     return np.std(_trailing(pr, window), ddof=1) * np.sqrt(tdays)
 
 
+def _finite(value: object) -> float | None:
+    """A plain float, or None for missing and NaN/inf values (shown as "n/a")."""
+    if value is None:
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _year_of_closes(symbol: str) -> pd.Series:
+    """Last year of closes, from the price cache when the run already fetched them."""
+    cached = market._hist_cache.get(symbol)
+    if cached is not None:
+        return cached
+    return yf.Ticker(symbol).history(period="1y")["Close"]
+
+
 def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) -> dict:
-    RISK_FREE = risk_free_rate()
-    TDAYS = 252
+    """Risk figures of today's holdings over the last year, from the dashboard's engine.
+
+    The portfolio is today's holdings held unchanged (`analytics.buy_hold_returns`)
+    and the figures come from `analytics.risk_stats`, so the email and the
+    dashboard's 1Y column use the same formulas and the same benchmark ETFs.
+    Beta, alpha and correlation are against the S&P 500 ETF. A value that
+    cannot be computed is None, never a neutral-looking default.
+    """
+    risk_free = risk_free_rate()
 
     log.info("Computing advanced metrics…")
 
@@ -76,105 +101,71 @@ def compute_advanced_metrics(positions: list[dict], fx_rates: dict[str, float]) 
     if total_val == 0:
         return {}
 
-    ret_df: dict[str, object] = {}
-    weights_map: dict[str, float] = {}
+    prices: dict[str, pd.Series] = {}
+    units: dict[str, float] = {}
     for p in positions:
+        ticker = p["ticker"]
         try:
-            hist_close = market._hist_cache.get(p["ticker"])
-            if hist_close is None:
-                hist_close = yf.Ticker(p["ticker"]).history(period="1y")["Close"]
-            if hist_close.empty or len(hist_close) < 60:
+            close = _year_of_closes(ticker)
+            if close is None or close.empty or len(close) < MIN_HISTORY_DAYS:
                 continue
-            hist_eur = _to_eur_close(hist_close, p.get("currency", "USD"), fx_rates)
-            ret_df[p["ticker"]] = hist_eur.pct_change().dropna()
-            weights_map[p["ticker"]] = p["value_eur"] / total_val
-        except Exception:
+            eur = _to_eur_close(close, p.get("currency", "USD"), fx_rates).dropna()
+        except Exception as exc:
+            log.debug("No price history for %s in metrics: %s", ticker, exc)
             continue
+        if eur.empty or not float(eur.iloc[-1]):
+            continue
+        prices[ticker] = eur
+        # Share count implied by today's value, so one ticker held twice adds up.
+        units[ticker] = units.get(ticker, 0.0) + p["value_eur"] / float(eur.iloc[-1])
 
-    if not ret_df:
+    if not prices:
         log.warning("Not enough history for metrics")
         return {}
 
-    df = pd.DataFrame(ret_df)
-    w = pd.Series(weights_map).reindex(df.columns).fillna(0)
-    # Renormalise weights per day: tickers absent (holiday/NaN) are excluded
-    # so the portfolio return is not understated.
-    active_w = df.notna().mul(w, axis=1)
-    day_w_sum = active_w.sum(axis=1).replace(0, np.nan)
-    port_ret_series = df.fillna(0).mul(active_w).sum(axis=1).div(day_w_sum)
-    port_ret_series = port_ret_series.dropna()
-
-    if len(port_ret_series) < 60:
-        log.warning("Not enough history for metrics")
-        return {}
+    px = pd.DataFrame(prices).sort_index()
+    port_ret, _coverage = buy_hold_returns(px, pd.Series(units))
 
     try:
-        _cached = market._hist_cache.get("^GSPC")
-        sp500_close = _cached if _cached is not None else yf.Ticker("^GSPC").history(period="1y")["Close"]
-        sp500_eur = _to_eur_close(sp500_close, "USD", fx_rates)
-        sp500_ret = sp500_eur.pct_change().dropna()
+        bench = pd.DataFrame({
+            key: _to_eur_close(_year_of_closes(market.BENCHMARK_ETFS[key][0]), "EUR", fx_rates)
+            for key in ("sp500", "world")
+        })
     except Exception as exc:
-        log.error("Failed to fetch S&P 500 for metrics: %s", exc)
+        log.error("Failed to fetch benchmark ETFs for metrics: %s", exc)
+        return {}
+    bench_ret = returns_on_calendar(bench, px.index).reindex(port_ret.index).fillna(0.0)
+
+    stats = risk_stats(port_ret, bench_ret["sp500"], bench_ret["world"], risk_free)
+    if not stats:
+        log.warning("Not enough history for metrics")
         return {}
 
-    common_idx = port_ret_series.index.intersection(sp500_ret.index)
-    if len(common_idx) < 60:
-        return {}
-
-    pr = np.asarray(port_ret_series.loc[common_idx].values, dtype=float)
-    sr = np.asarray(sp500_ret.loc[common_idx].values, dtype=float)
-
-    ann_ret = np.mean(pr) * TDAYS
-    ann_vol = np.std(pr, ddof=1) * np.sqrt(TDAYS)
-    sp500_ann = np.mean(sr) * TDAYS
-
-    sharpe = (ann_ret - RISK_FREE) / ann_vol if ann_vol else 0.0
-
-    neg = pr[pr < 0]
-    down_vol = np.std(neg, ddof=1) * np.sqrt(TDAYS) if len(neg) > 1 else ann_vol
-    sortino = (ann_ret - RISK_FREE) / down_vol if down_vol else 0.0
-
-    # Beta and correlation on weekly returns: Xetra closes hours before New
-    # York, so daily EUR listings lag US moves by a day and daily co-movement
-    # comes out wrong (see analytics.to_weekly). Return/risk figures of the
-    # portfolio alone stay daily.
-    weekly = to_weekly(pd.DataFrame({"p": pr, "s": sr}, index=common_idx)).dropna()
+    pr = port_ret.to_numpy(dtype=float)
+    weekly = to_weekly(pd.DataFrame({"p": port_ret, "s": bench_ret["sp500"]})).dropna()
     pr_w = weekly["p"].to_numpy(dtype=float)
     sr_w = weekly["s"].to_numpy(dtype=float)
+    enough_weeks = len(pr_w) >= 2
 
-    cov = np.cov(pr_w, sr_w)
-    beta = cov[0, 1] / cov[1, 1] if cov[1, 1] else 1.0
-    alpha = ann_ret - (RISK_FREE + beta * (sp500_ann - RISK_FREE))
-
-    cum = np.cumprod(1 + pr)
-    peak = np.maximum.accumulate(cum)
-    max_dd = float(np.min((cum - peak) / peak))
-
-    calmar = ann_ret / abs(max_dd) if max_dd != 0 else 0.0
-    var_95 = float(np.percentile(pr, 5))
-    # Full-period (not rolling) Expected Shortfall: mean return in the worst 5% of all-time daily returns.
-    cvar_95 = float(np.mean(pr[pr <= np.percentile(pr, 5)]))
-    correlation = float(np.corrcoef(pr_w, sr_w)[0, 1])
-
-    sharpe_90d = _trailing_sharpe(pr, 90, RISK_FREE, TDAYS)
-    beta_13w = _trailing_beta(pr_w, sr_w, 13)
-    beta_26w = _trailing_beta(pr_w, sr_w, 26)
-    vol_30d = _trailing_vol(pr, 30, TDAYS)
-
-    hhi = sum((p["value_eur"] / total_val) ** 2 for p in positions) if total_val else 0.0
+    hhi = sum((p["value_eur"] / total_val) ** 2 for p in positions)
     win_rate = sum(1 for p in positions if p["pl_pct"] > 0) / len(positions) * 100
 
-    log.info(
-        "Metrics: Sharpe=%.2f  Beta=%.2f  MaxDD=%.1f%%  VaR95=%.2f%%",
-        sharpe, beta, max_dd * 100, var_95 * 100,
+    metrics = dict(
+        sharpe=stats["sharpe"], sortino=stats["sortino"], beta=stats["beta"], alpha=stats["alpha"],
+        volatility=stats["volatility"], max_drawdown=stats["max_dd"], calmar=stats["calmar"],
+        var_95=stats["var_95"], correlation=stats["correlation"], hhi=hhi, win_rate=win_rate,
+        cvar_95=stats["cvar_95"],
+        sharpe_90d=_trailing_sharpe(pr, 90, risk_free, TDAYS),
+        beta_13w=_trailing_beta(pr_w, sr_w, 13) if enough_weeks else None,
+        beta_26w=_trailing_beta(pr_w, sr_w, 26) if enough_weeks else None,
+        vol_30d=_trailing_vol(pr, 30, TDAYS),
     )
-    return dict(
-        sharpe=sharpe, sortino=sortino, beta=beta, alpha=alpha,
-        volatility=ann_vol, max_drawdown=max_dd, calmar=calmar,
-        var_95=var_95, correlation=correlation, hhi=hhi, win_rate=win_rate,
-        cvar_95=cvar_95, sharpe_90d=sharpe_90d,
-        beta_13w=beta_13w, beta_26w=beta_26w, vol_30d=vol_30d,
-    )
+    metrics = {key: _finite(value) for key, value in metrics.items()}
+    log.info("Metrics: %s", ", ".join(
+        f"{key}={metrics[key]:.2f}" for key in ("sharpe", "beta", "max_drawdown", "var_95")
+        if metrics[key] is not None
+    ))
+    return metrics
 
 
 def compute_momentum_scores(positions: list[dict]) -> list[dict]:

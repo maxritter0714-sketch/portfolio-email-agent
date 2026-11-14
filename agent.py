@@ -19,7 +19,6 @@ from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-import yfinance as yf
 from dotenv import load_dotenv
 
 from claude_report import (
@@ -36,7 +35,6 @@ from claude_report import (
 from email_html import build_html_email
 from paths import OUTPUT_DIR
 from market import (
-    _hist_cache,
     append_history,
     last_trading_day,
     compute_allocation_drift,
@@ -56,6 +54,7 @@ from market import (
     load_unmapped_isins,
     next_portfolio_index,
     recommendation_ref_prices,
+    sp500_index_close,
     value_change_breakdown,
 )
 from metrics import (
@@ -150,7 +149,7 @@ def inline_chart_images(html: str, chart_files: dict[str, str]) -> str:
 def record_history(positions: list[dict], summary: dict, fx_rates: dict[str, float]) -> None:
     """Append the latest trading day's data point, including the deposit-free portfolio index."""
     source = "scheduled" if os.environ.get("GITHUB_ACTIONS") == "true" else "manual"
-    sp500 = _hist_cache.get("^GSPC")
+    sp500 = sp500_index_close()
     day = last_trading_day(sp500)
     port_index = next_portfolio_index(positions, fx_rates, today=day)
     sp500_eur = None
@@ -200,11 +199,6 @@ def main() -> None:
                     "Unknown FX (USD fallback) for: %s",
                     ", ".join(f"{s['ticker']} ({s['currency']})" for s in unknown_fx),
                 )
-            try:
-                sp500 = yf.Ticker("^GSPC").history(period="2d")["Close"]
-                _hist_cache["^GSPC"] = sp500
-            except Exception:
-                pass
             record_history(positions, summary, fx_rates)
         except Exception as exc:
             log.error("Data-only run failed: %s", exc)
