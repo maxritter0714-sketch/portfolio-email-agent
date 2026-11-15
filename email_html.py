@@ -303,17 +303,19 @@ def _emphasize_numbers(text: str) -> str:
 _ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
 
 
-def _small_td(content: str, align: str = "left", color: str = TEXT_PRIMARY) -> str:
+def _small_td(content: str, align: str = "left", color: str = TEXT_PRIMARY, cls: str = "") -> str:
+    cls_attr = f' class="{cls}"' if cls else ""
     return (
-        f'<td style="padding:10px 4px;border-bottom:1px solid {RULE_FAINT};'
+        f'<td{cls_attr} style="padding:10px 4px;border-bottom:1px solid {RULE_FAINT};'
         f'font-family:Arial,Helvetica,sans-serif;font-size:13px;text-align:{align};'
         f'font-variant-numeric:tabular-nums;color:{color}">{content}</td>'
     )
 
 
-def _small_th(label: str, align: str = "left") -> str:
+def _small_th(label: str, align: str = "left", cls: str = "") -> str:
+    cls_attr = f' class="{cls}"' if cls else ""
     return (
-        f'<th style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
+        f'<th{cls_attr} style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
         f'text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};'
         f'text-align:{align};padding:8px 4px;border-bottom:1px solid {TEXT_PRIMARY};'
         f'font-weight:600">{label}</th>'
@@ -413,7 +415,7 @@ def _scorecard_html(scorecard: list[dict]) -> str:
             + _small_td(html.escape(r["action"]))
             + _small_td(since, "right", TEXT_SECONDARY)
             + _small_td(ret, "right", ret_color)
-            + _small_td(world, "right", TEXT_SECONDARY)
+            + _small_td(world, "right", TEXT_SECONDARY, "hide-mobile")
             + _small_td(relative, "right", relative_color)
             + _small_td(verdict, "center")
             + "</tr>"
@@ -422,7 +424,7 @@ def _scorecard_html(scorecard: list[dict]) -> str:
         summary
         + '<table width="100%" cellpadding="0" cellspacing="0"><thead><tr>'
         + _small_th("Ticker") + _small_th("Call") + _small_th("Since", "right")
-        + _small_th("Return", "right") + _small_th("World", "right")
+        + _small_th("Return", "right") + _small_th("World", "right", "hide-mobile")
         + _small_th("Relative", "right") + _small_th("Hit", "center")
         + f"</tr></thead><tbody>{rows}</tbody></table>"
     )
