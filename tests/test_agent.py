@@ -44,7 +44,6 @@ from metrics import (
 from news import (
     _extract_text_from_response,
     _first_token,
-    _matches_macro,
     _query_name_batches,
     _tag_article_tickers,
 )
@@ -110,22 +109,6 @@ def test_classification_stock_missing_fields():
     sector, region = get_ticker_classification("XYZ", {})
     assert sector == "Other"
     assert region == "Other"
-
-
-# ── _matches_macro ────────────────────────────────────────────────────────────
-
-def test_matches_macro_economy_keyword():
-    assert _matches_macro("Fed signals rate cut amid slowing GDP growth")
-
-def test_matches_macro_tech_keyword():
-    assert _matches_macro("New AI breakthrough could reshape semiconductor industry")
-
-def test_matches_macro_excluded_sport_keyword():
-    # "sport" in title triggers exclusion even if macro keyword present
-    assert not _matches_macro("Rate your favourite sports team in our new poll")
-
-def test_matches_macro_no_keywords():
-    assert not _matches_macro("Local bakery wins award for best croissant")
 
 
 # ── _first_token ──────────────────────────────────────────────────────────────

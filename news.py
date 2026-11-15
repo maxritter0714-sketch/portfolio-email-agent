@@ -294,22 +294,9 @@ def filter_news_by_relevance(
         return _fallback(exc)
 
 
-_MACRO_KEYWORDS = [
-    "fed", "inflation", "rate", "rates", "gdp", "election", "policy",
-    "regulation", "tariff", "trade", "oil", "war", "treaty", "ai",
-    "breakthrough", "discovery", "vaccine", "climate",
-]
-_EXCLUDE_KEYWORDS = [
-    "airline", "airlines", "podcast", "podcasts", "celebrity", "sport", "sports",
-]
-
-
 def _compile_kw(keywords: list[str]) -> re.Pattern:
     return re.compile(r"\b(?:" + "|".join(re.escape(k) for k in keywords) + r")\b")
 
-
-_MACRO_RE = _compile_kw(_MACRO_KEYWORDS)
-_EXCLUDE_RE = _compile_kw(_EXCLUDE_KEYWORDS)
 
 _POLITICS_RE = _compile_kw([
     "election", "president", "senator", "government", "policy", "regulation",
@@ -324,13 +311,6 @@ _ECONOMY_RE = _compile_kw([
     "fed", "inflation", "rate", "gdp", "trade", "oil", "market", "economy",
     "bank", "dollar", "euro", "recession", "growth", "stock",
 ])
-
-
-def _matches_macro(title: str) -> bool:
-    t = title.lower()
-    if _EXCLUDE_RE.search(t):
-        return False
-    return bool(_MACRO_RE.search(t))
 
 
 def _classify_news(title: str) -> str:
