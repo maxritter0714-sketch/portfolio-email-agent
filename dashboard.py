@@ -37,15 +37,13 @@ from market import (
     currency_exposure,
     fetch_portfolio_data,
     get_fx_rates,
-    holdings_as_of,
     lifetime_return,
-    load_cashflows,
-    load_portfolio,
     region_exposure,
     sector_exposure,
 )
 from metrics import compute_momentum_scores, risk_free_rate
 from paths import DATA_DIR, OUTPUT_DIR
+from portfolio_io import holdings_as_of, load_cashflows, load_portfolio
 from theme import (
     _PALETTE,
     BG_CHART,

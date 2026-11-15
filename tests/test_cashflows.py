@@ -4,6 +4,7 @@ from datetime import date
 import pytest
 
 import market
+import portfolio_io
 from import_cashflows import daily_cashflows
 
 ACCOUNT = "Trade Republic Verrechnungskonto"
@@ -51,8 +52,8 @@ def test_load_cashflows_old_format_has_no_order_count(tmp_path):
     old.write_text("date,invested_eur,income_eur\n2026-10-01,100.0,0.0\n", encoding="utf-8")
     new = tmp_path / "new.csv"
     new.write_text("date,invested_eur,income_eur,orders\n2026-10-01,100.0,0.0,3\n", encoding="utf-8")
-    assert market.load_cashflows(old)[0]["orders"] is None
-    assert market.load_cashflows(new)[0]["orders"] == 3
+    assert portfolio_io.load_cashflows(old)[0]["orders"] is None
+    assert portfolio_io.load_cashflows(new)[0]["orders"] == 3
 
 
 def test_breakdown_splits_change_into_paid_in_and_market():

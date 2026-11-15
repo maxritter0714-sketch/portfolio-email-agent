@@ -21,7 +21,8 @@ import pandas as pd
 import yfinance as yf
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from market import _to_eur_close, get_fx_rates, is_send_saturday, issue_number  # noqa: E402
+from market import _to_eur_close, get_fx_rates  # noqa: E402
+from portfolio_io import is_send_saturday, issue_number  # noqa: E402
 
 DEMO_DIR = Path(__file__).resolve().parent.parent / "docs" / "demo"
 

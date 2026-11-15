@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 import market
+import portfolio_io
 from claude_report import (
     _assert_analysis_complete,
     _value_vs_jan_line,
@@ -32,8 +33,6 @@ from market import (
     _window_pct,
     get_history_ytd,
     get_ticker_classification,
-    is_send_saturday,
-    issue_number,
     to_eur_rate,
 )
 from metrics import (
@@ -52,6 +51,7 @@ from news import (
     _query_name_batches,
     _tag_article_tickers,
 )
+from portfolio_io import is_send_saturday, issue_number
 
 # ── issue_number ──────────────────────────────────────────────────────────────
 
@@ -1133,7 +1133,7 @@ def test_history_row_carries_the_issue_of_the_pricing_day(monkeypatch):
     assert agent.record_history([], {"total_value_eur": 1000.0}, {"USD": 0.9}, [], []) == []
     # Written on the send Saturday (issue 48), the row belongs to Friday (issue 47).
     assert written["day"] == real_date(2026, 10, 30)
-    assert written["issue"] == market.issue_number(real_date(2026, 10, 30)) == 47
+    assert written["issue"] == portfolio_io.issue_number(real_date(2026, 10, 30)) == 47
 
 
 # ── Incomplete data never becomes a history row ───────────────────────────────
@@ -1306,7 +1306,7 @@ def test_allocation_drift_groups_and_flags():
 
 
 def test_load_targets_missing_file_returns_none(tmp_path):
-    assert market.load_targets(tmp_path / "targets.json") is None
+    assert portfolio_io.load_targets(tmp_path / "targets.json") is None
 
 
 # ── Recommendation track record ───────────────────────────────────────────────
@@ -1443,19 +1443,19 @@ def test_optional_sections_numbered_after_actionable():
 
 def test_holdings_as_of_prefers_env(monkeypatch):
     monkeypatch.setenv("PORTFOLIO_AS_OF", "2026-06-14")
-    assert market.holdings_as_of() == real_date(2026, 6, 14)
+    assert portfolio_io.holdings_as_of() == real_date(2026, 6, 14)
 
 
 def test_holdings_as_of_falls_back_to_file_date(tmp_path, monkeypatch):
     monkeypatch.delenv("PORTFOLIO_AS_OF", raising=False)
-    monkeypatch.setattr(market, "_EXPORT_PATH", tmp_path / "missing.csv")
+    monkeypatch.setattr(portfolio_io, "_EXPORT_PATH", tmp_path / "missing.csv")
     portfolio = tmp_path / "portfolio.csv"
     portfolio.write_text("ticker\n", encoding="utf-8")
-    assert market.holdings_as_of(str(portfolio)) == real_date.today()
+    assert portfolio_io.holdings_as_of(str(portfolio)) == real_date.today()
 
 
 def test_load_unmapped_isins_missing_file(tmp_path):
-    assert market.load_unmapped_isins(tmp_path / "unmapped_isins.json") == []
+    assert portfolio_io.load_unmapped_isins(tmp_path / "unmapped_isins.json") == []
 
 
 def test_email_warns_on_stale_holdings_and_lists_unmapped():

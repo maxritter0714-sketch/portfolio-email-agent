@@ -43,15 +43,8 @@ from market import (
     get_fx_rates,
     get_history_ytd,
     history_blockers,
-    holdings_as_of,
-    is_send_saturday,
-    issue_number,
     last_trading_day,
     lifetime_return,
-    load_cashflows,
-    load_portfolio,
-    load_targets,
-    load_unmapped_isins,
     next_portfolio_index,
     recommendation_prices,
     sp500_index_close,
@@ -68,6 +61,15 @@ from news import (
     filter_news_by_relevance,
 )
 from paths import OUTPUT_DIR
+from portfolio_io import (
+    holdings_as_of,
+    is_send_saturday,
+    issue_number,
+    load_cashflows,
+    load_portfolio,
+    load_targets,
+    load_unmapped_isins,
+)
 
 # ── Environment ───────────────────────────────────────────────────────────────
 load_dotenv()

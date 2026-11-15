@@ -289,7 +289,8 @@ python tools/readme_screenshots.py                 # needs: pip install playwrig
 | Path | Purpose |
 |---|---|
 | `agent.py` | CLI: schedule check, orchestration, Gmail send |
-| `market.py` | Portfolio load, FX, prices, history, charts, send cadence |
+| `market.py` | FX, prices, history, charts |
+| `portfolio_io.py` | Loads `data/` files (portfolio, targets, cashflows, unmapped ISINs) and the send cadence |
 | `metrics.py` | Sharpe, beta, momentum, look-through exposure |
 | `news.py` | NewsAPI and relevance filter |
 | `claude_report.py` | Claude analysis, headline, recommendation memory |
