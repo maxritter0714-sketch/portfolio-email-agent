@@ -93,3 +93,21 @@ def test_openfigi_outage_raises_instead_of_dropping_holdings(monkeypatch):
     with pytest.raises(import_portfolio.OpenFigiUnavailable):
         import_portfolio.bulk_openfigi_lookup(["US0378331005"], verbose=False)
     assert len(calls) == import_portfolio._OPENFIGI_ATTEMPTS
+
+
+def test_openfigi_short_reply_raises_instead_of_dropping_the_last_isins(monkeypatch):
+    import requests
+
+    import import_portfolio
+
+    class ShortReply:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [{"data": [{"ticker": "AAPL", "exchCode": "US"}]}]  # one answer for two ISINs
+
+    monkeypatch.setattr(requests, "post", lambda *args, **kwargs: ShortReply())
+    monkeypatch.setattr(import_portfolio.time, "sleep", lambda seconds: None)
+    with pytest.raises(import_portfolio.OpenFigiUnavailable, match="expected 2 results"):
+        import_portfolio.bulk_openfigi_lookup(["US0378331005", "US5949181045"], verbose=False)

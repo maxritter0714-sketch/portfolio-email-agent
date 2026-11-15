@@ -138,7 +138,7 @@ _OPENFIGI_ATTEMPTS = 3
 
 
 class OpenFigiUnavailable(RuntimeError):
-    """OpenFIGI could not be reached, as opposed to not knowing an ISIN."""
+    """OpenFIGI gave no usable answer, as opposed to not knowing an ISIN."""
 
 
 def _pick_ticker_from_figi(isin: str, candidates: list[dict]) -> str | None:
@@ -160,8 +160,9 @@ def bulk_openfigi_lookup(isins: list[str], verbose: bool = True) -> dict[str, st
     """Map a list of ISINs to Yahoo Finance tickers via OpenFIGI (100 per request).
 
     An ISIN OpenFIGI doesn't know maps to None. A request that still fails
-    after a few attempts raises OpenFigiUnavailable: treating an outage as
-    "unknown ISIN" would silently drop those holdings.
+    after a few attempts, or keeps answering with fewer results than ISINs,
+    raises OpenFigiUnavailable: treating either as "unknown ISIN" would
+    silently drop those holdings.
     """
     if not isins:
         return {}
@@ -186,6 +187,10 @@ def bulk_openfigi_lookup(isins: list[str], verbose: bool = True) -> dict[str, st
                 resp = requests.post(_OPENFIGI_URL, json=payload, headers=headers, timeout=15)
                 resp.raise_for_status()
                 results = resp.json()
+                if not isinstance(results, list) or len(results) != len(batch):
+                    # Answers are matched to ISINs by position, so a short reply
+                    # would leave the last ISINs without one.
+                    raise ValueError(f"expected {len(batch)} results, got {results!r:.200}")
                 break
             except Exception as exc:
                 if verbose:
@@ -193,7 +198,7 @@ def bulk_openfigi_lookup(isins: list[str], verbose: bool = True) -> dict[str, st
                 if attempt == _OPENFIGI_ATTEMPTS:
                     raise OpenFigiUnavailable(str(exc)) from exc
                 time.sleep(2 * attempt)
-        for isin, result in zip(batch, results, strict=False):
+        for isin, result in zip(batch, results, strict=True):
             if "error" in result or not result.get("data"):
                 out[isin] = None
             else:
@@ -393,7 +398,7 @@ def main() -> None:
     try:
         _, warnings = convert(args.input, args.output, FINANZFLUSS, verbose=not args.quiet)
     except OpenFigiUnavailable as exc:
-        print(f"Error: OpenFIGI could not be reached ({exc}); portfolio.csv was not rewritten.")
+        print(f"Error: OpenFIGI gave no usable answer ({exc}); portfolio.csv was not rewritten.")
         sys.exit(1)
     if warnings and os.getenv("GITHUB_ACTIONS") == "true":
         for w in warnings:

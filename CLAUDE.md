@@ -38,7 +38,7 @@ Stack: Python · yfinance · NewsAPI · Anthropic Claude · Gmail SMTP
 5. Optional: export account transactions as `data/finanzfluss_transactions.csv` (gitignored, contains private spending — never upload it), run `python import_cashflows.py --input data/finanzfluss_transactions.csv`, upload only `data/cashflows.csv` to the data repo (the data repo itself stays flat; the workflow copies its files into `data/`)
 6. Test: `python agent.py --force --preview`
 
-The import exits without rewriting `data/portfolio.csv` when a number in the export is unreadable or OpenFIGI stays unreachable; rerun it rather than editing the CSV by hand.
+The import exits without rewriting `data/portfolio.csv` when a number in the export is unreadable or OpenFIGI stays unreachable or keeps returning fewer results than ISINs; rerun it rather than editing the CSV by hand.
 
 ## ISIN map rules
 - Resolution priority: `data/isin_map.json` overrides (gitignored, personal) → OpenFIGI bulk API (Bloomberg, free, 100 ISINs per call) → yfinance Search API (slow, unreliable — last resort)

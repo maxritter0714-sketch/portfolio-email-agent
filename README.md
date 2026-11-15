@@ -316,7 +316,7 @@ python tools/readme_screenshots.py                 # needs: pip install playwrig
 | NewsAPI returns no articles | The free tier has query limits; try simpler company names |
 | Claude API error | Check `ANTHROPIC_API_KEY` and your credit balance |
 | Snapshot workflow fails with `History row not written` | The log names the holding or currency without data. That day stays a gap; later days are written as usual once Yahoo delivers again |
-| `Error: OpenFIGI could not be reached` | Run the import (or the workflow) again later; `portfolio.csv` was left untouched |
+| `Error: OpenFIGI gave no usable answer` | Run the import (or the workflow) again later; `portfolio.csv` was left untouched |
 | History chart missing | It needs four indexed rows in `history.csv`, i.e. four trading days of snapshots |
 
 All runs are logged to `output/agent.log`.
