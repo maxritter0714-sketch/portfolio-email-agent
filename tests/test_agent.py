@@ -1068,10 +1068,83 @@ def test_history_row_carries_the_issue_of_the_pricing_day(monkeypatch):
         agent, "append_history",
         lambda summary, issue, **kwargs: written.update(issue=issue, day=kwargs["day"]) or True,
     )
-    agent.record_history([], {"total_value_eur": 1000.0}, {"USD": 0.9})
+    monkeypatch.setattr(market, "_fx_fallback_used", set())
+    assert agent.record_history([], {"total_value_eur": 1000.0}, {"USD": 0.9}, [], []) == []
     # Written on the send Saturday (issue 48), the row belongs to Friday (issue 47).
     assert written["day"] == real_date(2026, 10, 30)
     assert written["issue"] == market.issue_number(real_date(2026, 10, 30)) == 47
+
+
+# ── Incomplete data never becomes a history row ───────────────────────────────
+
+_SP500 = pd.Series([7400.0], index=pd.to_datetime(["2026-11-13"]))
+_USD_POS = [{"ticker": "AAA", "currency": "USD"}, {"ticker": "VOD.L", "currency": "GBp"}]
+
+
+def test_history_blockers_empty_when_data_is_complete(monkeypatch):
+    monkeypatch.setattr(market, "_fx_fallback_used", {"JPY"})  # not a held currency
+    assert market.history_blockers(_USD_POS, [], [], _SP500) == []
+
+
+def test_history_blockers_name_every_gap(monkeypatch):
+    monkeypatch.setattr(market, "_fx_fallback_used", {"GBP", "JPY"})
+    reasons = market.history_blockers(
+        _USD_POS,
+        skipped=[{"ticker": "GONE", "name": "Gone", "reason": "no data"}],
+        unknown_fx=[{"ticker": "ODD", "name": "Odd", "currency": "XXX"}],
+        sp500_close=None,
+    )
+    assert reasons == [
+        "no price for GONE",
+        "no FX rate for ODD (XXX)",
+        "FX rate could not be fetched for GBP",
+        "no S&P 500 close to date the row",
+    ]
+
+
+def test_record_history_writes_nothing_when_a_holding_has_no_price(monkeypatch):
+    import agent
+    monkeypatch.setattr(market, "_fx_fallback_used", set())
+    monkeypatch.setattr(agent, "sp500_index_close", lambda: _SP500)
+    monkeypatch.setattr(agent, "append_history",
+                        lambda *a, **k: pytest.fail("a row was written"))
+    blockers = agent.record_history(
+        [], {"total_value_eur": 1000.0}, {"USD": 0.9},
+        skipped=[{"ticker": "GONE", "name": "Gone", "reason": "no data"}], unknown_fx=[],
+    )
+    assert blockers == ["no price for GONE"]
+
+
+def test_get_fx_rates_remembers_which_rates_are_constants(monkeypatch):
+    class FakeTicker:
+        def __init__(self, sym):
+            self.sym = sym
+
+        def history(self, period):
+            if self.sym == "EURHKD=X":
+                raise RuntimeError("no data")
+            return pd.DataFrame({"Close": [1.25]})
+
+    monkeypatch.setattr(market.yf, "Ticker", FakeTicker)
+    rates = market.get_fx_rates()
+    assert market.fx_fallback_currencies() == {"HKD"}
+    assert rates["HKD"] == _FX_FALLBACKS["HKD"] and rates["USD"] == pytest.approx(0.8)
+
+
+def test_listing_currency_reads_history_metadata_before_giving_up():
+    class NoFastInfo:
+        @property
+        def fast_info(self):
+            raise RuntimeError("quote endpoint down")
+
+    with_meta = NoFastInfo()
+    with_meta.history_metadata = {"currency": "HKD"}
+    assert market._listing_currency(with_meta, "3750.HK") == "HKD"
+
+    without = NoFastInfo()
+    without.history_metadata = {}
+    with pytest.raises(ValueError, match="No listing currency"):
+        market._listing_currency(without, "3750.HK")
 
 
 def test_last_trading_day_falls_back_without_prices():

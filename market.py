@@ -277,8 +277,19 @@ _FX_FALLBACKS: dict[str, float] = {
 }
 
 
+# Currencies whose rate the last get_fx_rates() call could not fetch.
+_fx_fallback_used: set[str] = set()
+
+
+def fx_fallback_currencies() -> set[str]:
+    """Currencies priced at a hardcoded constant in the last `get_fx_rates()` call."""
+    return set(_fx_fallback_used)
+
+
 def get_fx_rates() -> dict[str, float]:
+    """EUR per unit of each currency; a failed lookup uses a constant and is remembered."""
     rates: dict[str, float] = {"EUR": 1.0}
+    _fx_fallback_used.clear()
     for currency, (sym, invert) in _FX_PAIRS.items():
         try:
             hist = yf.Ticker(sym).history(period="1d")
@@ -290,6 +301,7 @@ def get_fx_rates() -> dict[str, float]:
             log.warning("Could not fetch %s rate (%s) — using fallback %.4f",
                         currency, exc, fallback)
             rates[currency] = fallback
+            _fx_fallback_used.add(currency)
     rates["GBp"] = rates.get("GBP", _FX_FALLBACKS["GBP"]) / 100
     rates["GBX"] = rates["GBp"]
     return rates
@@ -395,6 +407,23 @@ def _ytd_pct_from_close(close: pd.Series, year: int) -> float:
     return (current - ref) / ref * 100 if ref else 0.0
 
 
+def _listing_currency(ticker: Any, symbol: str) -> str:
+    """Currency the symbol is quoted in, from Yahoo's quote data or the history metadata.
+
+    Raises when Yahoo reports none. Assuming USD would misprice a holding
+    quoted in another currency without any visible sign of it.
+    """
+    for read in (lambda: ticker.fast_info.currency,
+                 lambda: ticker.history_metadata.get("currency")):
+        try:
+            currency = read()
+        except Exception:
+            continue
+        if currency:
+            return currency
+    raise ValueError(f"No listing currency returned for {symbol}")
+
+
 def _bars_up_to(hist: pd.DataFrame, as_of: date | None) -> pd.DataFrame:
     """Drop price bars dated after `as_of`, by the exchange's own calendar.
 
@@ -426,10 +455,7 @@ def get_price_changes(
     if hist.empty:
         raise ValueError(f"No finalized price history returned for {symbol}")
 
-    try:
-        currency = ticker.fast_info.currency or "USD"
-    except Exception:
-        currency = "USD"
+    currency = _listing_currency(ticker, symbol)
 
     current = float(hist["Close"].iloc[-1])
     close_for_pct = hist["Close"]
@@ -821,6 +847,32 @@ def append_history(
             writer.writeheader()
         writer.writerow(row)
     return True
+
+
+def history_blockers(
+    positions: list[dict],
+    skipped: list[dict],
+    unknown_fx: list[dict],
+    sp500_close: pd.Series | None,
+) -> list[str]:
+    """Reasons this run's data must not become a history row; empty when it is complete.
+
+    A row built on a missing holding, a guessed currency or a constant FX rate
+    looks like any other row but carries a wrong total, so none is written.
+    """
+    reasons: list[str] = []
+    if skipped:
+        reasons.append("no price for " + ", ".join(s["ticker"] for s in skipped))
+    if unknown_fx:
+        reasons.append("no FX rate for " + ", ".join(
+            f"{s['ticker']} ({s['currency']})" for s in unknown_fx))
+    held = {"GBP" if p.get("currency") in ("GBp", "GBX") else p.get("currency") for p in positions}
+    constant = sorted(fx_fallback_currencies() & held)
+    if constant:
+        reasons.append("FX rate could not be fetched for " + ", ".join(constant))
+    if sp500_close is None or sp500_close.empty:
+        reasons.append("no S&P 500 close to date the row")
+    return reasons
 
 
 def last_trading_day(close: pd.Series | None, fallback: date | None = None) -> date:

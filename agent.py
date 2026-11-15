@@ -42,6 +42,7 @@ from market import (
     generate_charts,
     get_fx_rates,
     get_history_ytd,
+    history_blockers,
     holdings_as_of,
     is_send_saturday,
     issue_number,
@@ -153,10 +154,24 @@ def pricing_day() -> date:
     return last_trading_day(sp500_index_close())
 
 
-def record_history(positions: list[dict], summary: dict, fx_rates: dict[str, float]) -> None:
-    """Append the latest trading day's data point, including the deposit-free portfolio index."""
+def record_history(
+    positions: list[dict],
+    summary: dict,
+    fx_rates: dict[str, float],
+    skipped: list[dict],
+    unknown_fx: list[dict],
+) -> list[str]:
+    """Append the latest trading day's data point, including the deposit-free portfolio index.
+
+    Writes nothing when the run's data is incomplete and returns the reasons
+    (empty when the data was fit to record).
+    """
     source = "scheduled" if os.environ.get("GITHUB_ACTIONS") == "true" else "manual"
     sp500 = sp500_index_close()
+    blockers = history_blockers(positions, skipped, unknown_fx, sp500)
+    if blockers:
+        log.error("History row not written, data incomplete: %s", "; ".join(blockers))
+        return blockers
     day = pricing_day()
     port_index = next_portfolio_index(positions, fx_rates, today=day)
     sp500_eur = None
@@ -166,6 +181,7 @@ def record_history(positions: list[dict], summary: dict, fx_rates: dict[str, flo
                       port_index=port_index, sp500_eur=sp500_eur, day=day):
         log.info("History updated for %s — total value EUR %.0f, index %.2f (source=%s)",
                  day, summary["total_value_eur"], port_index, source)
+    return []
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -208,9 +224,11 @@ def main() -> None:
                     "Unknown FX (USD fallback) for: %s",
                     ", ".join(f"{s['ticker']} ({s['currency']})" for s in unknown_fx),
                 )
-            record_history(positions, summary, fx_rates)
+            blockers = record_history(positions, summary, fx_rates, skipped, unknown_fx)
         except Exception as exc:
             log.error("Data-only run failed: %s", exc)
+            sys.exit(1)
+        if blockers:
             sys.exit(1)
         return
 
@@ -288,7 +306,7 @@ def main() -> None:
         allocation = compute_allocation_drift(positions, targets) if targets else []
 
         if not args.force:
-            record_history(positions, summary, fx_rates)
+            record_history(positions, summary, fx_rates, skipped, unknown_fx)
         log.info("Generating charts…")
         charts = generate_charts(positions, summary, benchmarks)
 

@@ -60,6 +60,8 @@ jobs:
         run: python import_portfolio.py --input data/finanzfluss_export.csv --allow-missing
 
       - name: Collect data point (fills Friday's row if the daily snapshot missed it)
+        # Incomplete data writes no row and fails this step; the report still goes out.
+        continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python agent.py --data-only

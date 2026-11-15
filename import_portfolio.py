@@ -51,15 +51,15 @@ class ExportConfig:
 
 
 def parse_german_float(raw: str) -> float:
-    """Convert a German-locale number string to float. '1.234,56' -> 1234.56"""
+    """Convert a German-locale number string to float. '1.234,56' -> 1234.56
+
+    Empty and 'N/A' are 0. Anything else unreadable raises ValueError: read as
+    0, a holding would vanish like a sold position.
+    """
     s = raw.strip().strip('"').strip()
     if not s or s == "N/A":
         return 0.0
-    s = s.replace(".", "").replace(",", ".")
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
+    return float(s.replace(".", "").replace(",", "."))
 
 
 # Built-in config for Finanzfluss exports
@@ -134,6 +134,11 @@ _PREFIX_EXCH_PRIORITY: dict[str, list[str]] = {
 
 _OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
 _OPENFIGI_BATCH_SIZE = 100
+_OPENFIGI_ATTEMPTS = 3
+
+
+class OpenFigiUnavailable(RuntimeError):
+    """OpenFIGI could not be reached, as opposed to not knowing an ISIN."""
 
 
 def _pick_ticker_from_figi(isin: str, candidates: list[dict]) -> str | None:
@@ -152,7 +157,12 @@ def _pick_ticker_from_figi(isin: str, candidates: list[dict]) -> str | None:
 
 
 def bulk_openfigi_lookup(isins: list[str], verbose: bool = True) -> dict[str, str | None]:
-    """Map a list of ISINs to Yahoo Finance tickers via OpenFIGI (100 per request)."""
+    """Map a list of ISINs to Yahoo Finance tickers via OpenFIGI (100 per request).
+
+    An ISIN OpenFIGI doesn't know maps to None. A request that still fails
+    after a few attempts raises OpenFigiUnavailable: treating an outage as
+    "unknown ISIN" would silently drop those holdings.
+    """
     if not isins:
         return {}
     try:
@@ -171,16 +181,18 @@ def bulk_openfigi_lookup(isins: list[str], verbose: bool = True) -> dict[str, st
     for i in range(0, len(isins), _OPENFIGI_BATCH_SIZE):
         batch = isins[i : i + _OPENFIGI_BATCH_SIZE]
         payload = [{"idType": "ID_ISIN", "idValue": isin} for isin in batch]
-        try:
-            resp = requests.post(_OPENFIGI_URL, json=payload, headers=headers, timeout=15)
-            resp.raise_for_status()
-            results = resp.json()
-        except Exception as exc:
-            if verbose:
-                print(f"  [openfigi] Request failed: {exc}", file=sys.stderr)
-            for isin in batch:
-                out[isin] = None
-            continue
+        for attempt in range(1, _OPENFIGI_ATTEMPTS + 1):
+            try:
+                resp = requests.post(_OPENFIGI_URL, json=payload, headers=headers, timeout=15)
+                resp.raise_for_status()
+                results = resp.json()
+                break
+            except Exception as exc:
+                if verbose:
+                    print(f"  [openfigi] Request failed (attempt {attempt}): {exc}", file=sys.stderr)
+                if attempt == _OPENFIGI_ATTEMPTS:
+                    raise OpenFigiUnavailable(str(exc)) from exc
+                time.sleep(2 * attempt)
         for isin, result in zip(batch, results):
             if "error" in result or not result.get("data"):
                 out[isin] = None
@@ -268,12 +280,20 @@ def convert(
     if verbose:
         print(f"Read {len(rows)} rows from '{input_path}'.")
 
+    def number(row: dict, col: str) -> float:
+        try:
+            return cfg.parse_number(row.get(col, "0"))
+        except ValueError:
+            print(f"Error: unreadable {col} {row.get(col)!r} for "
+                  f"'{row.get(cfg.col_name, '').strip()}' in '{input_path}'.")
+            sys.exit(1)
+
     # Filter: drop excluded types and zero-share positions
     active_rows = []
     for row in rows:
         if row.get(cfg.col_type, "").strip() in cfg.excluded_types:
             continue
-        if cfg.parse_number(row.get(cfg.col_shares, "0")) <= 0:
+        if number(row, cfg.col_shares) <= 0:
             continue
         active_rows.append(row)
 
@@ -300,8 +320,8 @@ def convert(
     for row in active_rows:
         name = row.get(cfg.col_name, "").strip()
         isin = row.get(cfg.col_isin, "").strip()
-        shares = cfg.parse_number(row.get(cfg.col_shares, "0"))
-        price = cfg.parse_number(row.get(cfg.col_price, "0"))
+        shares = number(row, cfg.col_shares)
+        price = number(row, cfg.col_price)
 
         ticker = resolve_ticker(isin, name, openfigi_cache, verbose=verbose)
 
@@ -370,7 +390,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    _, warnings = convert(args.input, args.output, FINANZFLUSS, verbose=not args.quiet)
+    try:
+        _, warnings = convert(args.input, args.output, FINANZFLUSS, verbose=not args.quiet)
+    except OpenFigiUnavailable as exc:
+        print(f"Error: OpenFIGI could not be reached ({exc}); portfolio.csv was not rewritten.")
+        sys.exit(1)
     if warnings and os.getenv("GITHUB_ACTIONS") == "true":
         for w in warnings:
             print(f"::warning title=Unmapped ISIN::{w}")

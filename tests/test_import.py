@@ -68,3 +68,27 @@ def test_convert_writes_unmapped_isins(tmp_path, monkeypatch):
     assert count == 1 and len(warnings) == 1
     unmapped = json.loads((tmp_path / "unmapped_isins.json").read_text(encoding="utf-8"))
     assert unmapped == [{"isin": "DE000TEST001", "name": "Unknown AG"}]
+
+
+# ── Unreadable input stops the import ─────────────────────────────────────────
+
+def test_parse_german_float_rejects_an_unreadable_number():
+    with pytest.raises(ValueError):
+        parse_german_float("12,5 Stk")
+
+
+def test_openfigi_outage_raises_instead_of_dropping_holdings(monkeypatch):
+    import requests
+    import import_portfolio
+
+    calls = []
+
+    def failing_post(*args, **kwargs):
+        calls.append(1)
+        raise requests.ConnectionError("down")
+
+    monkeypatch.setattr(requests, "post", failing_post)
+    monkeypatch.setattr(import_portfolio.time, "sleep", lambda seconds: None)
+    with pytest.raises(import_portfolio.OpenFigiUnavailable):
+        import_portfolio.bulk_openfigi_lookup(["US0378331005"], verbose=False)
+    assert len(calls) == import_portfolio._OPENFIGI_ATTEMPTS
