@@ -970,7 +970,8 @@ def test_fetch_benchmarks_requests_eur_returns(monkeypatch):
 
     def fake_price_changes(symbol, fx_rates=None, convert_to_eur=False):
         calls.append((symbol, fx_rates, convert_to_eur))
-        return 0.0, 1.0, 2.0, 3.0, 4.0, "USD", {}, {}, {}, 0.0
+        return market.PriceData(price=0.0, weekly_pct=1.0, fortnight_pct=2.0,
+                                monthly_pct=3.0, ytd_pct=4.0, currency="USD")
 
     monkeypatch.setattr(market, "get_price_changes", fake_price_changes)
     fx = {"EUR": 1.0, "USD": 0.9}

@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import tempfile
+from dataclasses import dataclass, field
 from datetime import date, datetime as dt, timedelta
 from pathlib import Path
 from typing import Any
@@ -442,12 +443,28 @@ def _bars_up_to(hist: pd.DataFrame, as_of: date | None) -> pd.DataFrame:
     return hist[days <= pd.Timestamp(as_of)]
 
 
+@dataclass(frozen=True)
+class PriceData:
+    """One symbol's latest price, window returns and fund data."""
+
+    price: float                # latest close, in the listing currency
+    weekly_pct: float
+    fortnight_pct: float
+    monthly_pct: float
+    ytd_pct: float
+    currency: str               # listing currency as Yahoo reports it
+    info: dict = field(default_factory=dict)
+    sector_weights: dict[str, float] = field(default_factory=dict)    # ETFs only
+    holdings_weights: dict[str, float] = field(default_factory=dict)  # ETFs only
+    dividends_ttm: float = 0.0  # per share over the last year, in the listing currency
+
+
 def get_price_changes(
     symbol: str,
     fx_rates: dict[str, float] | None = None,
     convert_to_eur: bool = False,
     as_of: date | None = None,
-) -> tuple[float, float, float, float, float, str, dict, dict, dict, float]:
+) -> PriceData:
     """Price, window returns and fund data for one symbol; `as_of` ignores later bars."""
     ticker = yf.Ticker(symbol)
     hist = _bars_up_to(ticker.history(period="1y"), as_of)
@@ -503,10 +520,15 @@ def get_price_changes(
         except Exception:
             pass
 
-    div_ttm_native = float(hist["Dividends"].sum()) if "Dividends" in hist.columns else 0.0
+    dividends_ttm = float(hist["Dividends"].sum()) if "Dividends" in hist.columns else 0.0
 
     _hist_cache[symbol] = hist["Close"]
-    return current, weekly_pct, fortnight_pct, monthly_pct, ytd_pct, currency, info, sector_weights, holdings_weights, div_ttm_native
+    return PriceData(
+        price=current, weekly_pct=weekly_pct, fortnight_pct=fortnight_pct,
+        monthly_pct=monthly_pct, ytd_pct=ytd_pct, currency=currency, info=info,
+        sector_weights=sector_weights, holdings_weights=holdings_weights,
+        dividends_ttm=dividends_ttm,
+    )
 
 
 def _expense_ratio(info: dict) -> float | None:
@@ -549,37 +571,37 @@ def fetch_portfolio_data(
         avg_buy_eur = float(row["avg_buy_price"])
 
         try:
-            price_native, weekly, fortnight, monthly, ytd, currency, info, sector_weights, holdings_weights, div_ttm_native = get_price_changes(
-                symbol, fx_rates=fx_rates, convert_to_eur=True, as_of=as_of,
-            )
+            quote = get_price_changes(symbol, fx_rates=fx_rates, convert_to_eur=True, as_of=as_of)
         except Exception as exc:
             log.error("Skipping %s – could not fetch data: %s", symbol, exc)
             skipped.append({"ticker": symbol, "name": name, "reason": str(exc)})
             continue
 
+        currency = quote.currency
         to_eur, used_usd_fallback = to_eur_rate(currency, fx_rates)
         if used_usd_fallback:
             unknown_fx.append({"ticker": symbol, "name": name, "currency": currency})
-        price_eur = price_native * to_eur
+        price_eur = quote.price * to_eur
         value_eur = shares * price_eur
         cost_eur = shares * avg_buy_eur
         pl_eur = value_eur - cost_eur
         pl_pct = pl_eur / cost_eur * 100 if cost_eur else 0.0
-        dividend_ttm_eur = shares * div_ttm_native * to_eur
+        dividend_ttm_eur = shares * quote.dividends_ttm * to_eur
 
-        sector, region = get_ticker_classification(symbol, info)
+        sector, region = get_ticker_classification(symbol, quote.info)
         positions.append(
             dict(
                 ticker=symbol, name=name, shares=shares,
                 avg_buy_eur=avg_buy_eur, currency=currency,
                 price_eur=price_eur, value_eur=value_eur, cost_eur=cost_eur,
                 pl_eur=pl_eur, pl_pct=pl_pct,
-                weekly_pct=weekly, fortnight_pct=fortnight, monthly_pct=monthly, ytd_pct=ytd,
+                weekly_pct=quote.weekly_pct, fortnight_pct=quote.fortnight_pct,
+                monthly_pct=quote.monthly_pct, ytd_pct=quote.ytd_pct,
                 sector=sector, region=region,
-                sector_weights=sector_weights,
-                holdings_weights=holdings_weights,
+                sector_weights=quote.sector_weights,
+                holdings_weights=quote.holdings_weights,
                 dividend_ttm_eur=dividend_ttm_eur,
-                expense_ratio=_expense_ratio(info),
+                expense_ratio=_expense_ratio(quote.info),
             )
         )
 
@@ -645,15 +667,14 @@ def fetch_benchmarks(fx_rates: dict[str, float]) -> list[dict]:
     results = []
     for symbol, label in BENCHMARKS:
         try:
-            _, weekly, fortnight, monthly, ytd, _cur, _info, _sw, _hw, _div = get_price_changes(
-                symbol, fx_rates=fx_rates, convert_to_eur=True,
-            )
+            quote = get_price_changes(symbol, fx_rates=fx_rates, convert_to_eur=True)
             results.append(
-                dict(symbol=symbol, name=label, weekly_pct=weekly,
-                     fortnight_pct=fortnight, monthly_pct=monthly, ytd_pct=ytd)
+                dict(symbol=symbol, name=label, weekly_pct=quote.weekly_pct,
+                     fortnight_pct=quote.fortnight_pct, monthly_pct=quote.monthly_pct,
+                     ytd_pct=quote.ytd_pct)
             )
             log.info("Benchmark %s: 1W %+.2f%% 1M %+.2f%% YTD %+.2f%%",
-                     label, weekly, monthly, ytd)
+                     label, quote.weekly_pct, quote.monthly_pct, quote.ytd_pct)
         except Exception as exc:
             log.error("Failed to fetch benchmark %s: %s", symbol, exc)
     return results
