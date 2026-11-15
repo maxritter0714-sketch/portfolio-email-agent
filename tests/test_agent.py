@@ -349,6 +349,15 @@ def test_assert_report_sections_rejects_an_actionable_section_without_items():
         assert_report_sections(body, parse_actionable(actionable))
 
 
+def test_ytd_starts_at_the_last_close_of_the_prior_year():
+    from market import _ytd_pct_from_close
+    idx = pd.to_datetime(["2025-12-30", "2025-12-31", "2026-01-02", "2026-11-13"])
+    close = pd.Series([90.0, 100.0, 104.0, 130.0], index=idx)
+    assert _ytd_pct_from_close(close, 2026) == pytest.approx(30.0)
+    # Listed this year: measured from its first close.
+    assert _ytd_pct_from_close(close.iloc[2:], 2026) == pytest.approx(25.0)
+
+
 # ── Recommendation log ────────────────────────────────────────────────────────
 
 _ITEMS = [

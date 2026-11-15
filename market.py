@@ -396,6 +396,11 @@ def _window_pct(close: pd.Series, bars: int) -> float:
 
 
 def _ytd_pct_from_close(close: pd.Series, year: int) -> float:
+    """Return since the last close of the prior year, as in the dashboard.
+
+    A name without a close before `year` (listed this year) is measured from
+    its first close.
+    """
     vals = close.dropna()
     if vals.empty:
         return 0.0
@@ -403,7 +408,8 @@ def _ytd_pct_from_close(close: pd.Series, year: int) -> float:
     ytd = vals[vals.index.year == year]
     if ytd.empty:
         return 0.0
-    ref = float(ytd.iloc[0])
+    prior = vals[vals.index.year < year]
+    ref = float(prior.iloc[-1] if not prior.empty else ytd.iloc[0])
     return (current - ref) / ref * 100 if ref else 0.0
 
 
