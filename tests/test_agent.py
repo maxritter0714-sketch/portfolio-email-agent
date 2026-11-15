@@ -1048,6 +1048,32 @@ def test_last_trading_day_uses_last_close_not_run_date():
     assert market.last_trading_day(close, fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 13)
 
 
+def test_bars_after_the_pricing_day_are_ignored():
+    # Hong Kong has reopened on the 17th while the last US close is the 16th.
+    idx = pd.DatetimeIndex(["2026-11-13 00:00", "2026-11-16 00:00", "2026-11-17 00:00"],
+                           tz="Asia/Hong_Kong")
+    hist = pd.DataFrame({"Close": [10.0, 11.0, 99.0]}, index=idx)
+    kept = market._bars_up_to(hist, real_date(2026, 11, 16))
+    assert list(kept["Close"]) == [10.0, 11.0]
+    assert market._bars_up_to(hist, None) is hist
+
+
+def test_history_row_carries_the_issue_of_the_pricing_day(monkeypatch):
+    import agent
+    friday = pd.Series([7400.0], index=pd.to_datetime(["2026-10-30"]))
+    written = {}
+    monkeypatch.setattr(agent, "sp500_index_close", lambda: friday)
+    monkeypatch.setattr(agent, "next_portfolio_index", lambda *a, **k: 100.0)
+    monkeypatch.setattr(
+        agent, "append_history",
+        lambda summary, issue, **kwargs: written.update(issue=issue, day=kwargs["day"]) or True,
+    )
+    agent.record_history([], {"total_value_eur": 1000.0}, {"USD": 0.9})
+    # Written on the send Saturday (issue 48), the row belongs to Friday (issue 47).
+    assert written["day"] == real_date(2026, 10, 30)
+    assert written["issue"] == market.issue_number(real_date(2026, 10, 30)) == 47
+
+
 def test_last_trading_day_falls_back_without_prices():
     assert market.last_trading_day(None, fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 14)
     assert market.last_trading_day(pd.Series(dtype=float), fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 14)

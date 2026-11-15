@@ -395,13 +395,27 @@ def _ytd_pct_from_close(close: pd.Series, year: int) -> float:
     return (current - ref) / ref * 100 if ref else 0.0
 
 
+def _bars_up_to(hist: pd.DataFrame, as_of: date | None) -> pd.DataFrame:
+    """Drop price bars dated after `as_of`, by the exchange's own calendar.
+
+    A run that starts after an Asian market has reopened would otherwise price
+    that holding mid-session, under the date of the previous US close.
+    """
+    if as_of is None or hist.empty:
+        return hist
+    days = pd.DatetimeIndex(hist.index).tz_localize(None).normalize()
+    return hist[days <= pd.Timestamp(as_of)]
+
+
 def get_price_changes(
     symbol: str,
     fx_rates: dict[str, float] | None = None,
     convert_to_eur: bool = False,
+    as_of: date | None = None,
 ) -> tuple[float, float, float, float, float, str, dict, dict, dict, float]:
+    """Price, window returns and fund data for one symbol; `as_of` ignores later bars."""
     ticker = yf.Ticker(symbol)
-    hist = ticker.history(period="1y")
+    hist = _bars_up_to(ticker.history(period="1y"), as_of)
     if hist.empty:
         raise ValueError(f"No price history returned for {symbol}")
 
@@ -487,8 +501,9 @@ def portfolio_return(positions: list[dict], key: str) -> float:
 
 
 def fetch_portfolio_data(
-    rows: list[dict], fx_rates: dict[str, float]
+    rows: list[dict], fx_rates: dict[str, float], as_of: date | None = None,
 ) -> tuple[list[dict], dict, list[dict], list[dict]]:
+    """Positions and portfolio summary; `as_of` values every holding at its close on or before that day."""
     positions = []
     unknown_fx: list[dict] = []
     skipped: list[dict] = []
@@ -503,7 +518,7 @@ def fetch_portfolio_data(
 
         try:
             price_native, weekly, fortnight, monthly, ytd, currency, info, sector_weights, holdings_weights, div_ttm_native = get_price_changes(
-                symbol, fx_rates=fx_rates, convert_to_eur=True,
+                symbol, fx_rates=fx_rates, convert_to_eur=True, as_of=as_of,
             )
         except Exception as exc:
             log.error("Skipping %s – could not fetch data: %s", symbol, exc)

@@ -1,9 +1,11 @@
 name: Daily Snapshot
 
 # One history.csv row per trading day: prices only, no Claude, no email.
-# 22:30 UTC is after the New York close in summer and winter time, so every
-# market in the portfolio has closed. The row is dated by the S&P 500's last
-# session, so the Saturday report run finds Friday's row and skips it.
+# 22:30 UTC is after the New York close in summer and winter time. GitHub
+# starts scheduled runs hours late (in practice 02:00-03:10 UTC), when Asian
+# markets have reopened, so the start time is not relied on: the row is dated
+# by the S&P 500's last session and every holding is valued at its close on or
+# before that day. The Saturday report run finds Friday's row and skips it.
 on:
   schedule:
     - cron: '30 22 * * 1-5'

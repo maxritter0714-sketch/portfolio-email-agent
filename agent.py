@@ -144,16 +144,25 @@ def inline_chart_images(html: str, chart_files: dict[str, str]) -> str:
 
 
 # ── History ───────────────────────────────────────────────────────────────────
+def pricing_day() -> date:
+    """The trading day a run's prices belong to: the S&P 500's last session.
+
+    Holdings are valued at their close on or before this day, so the result
+    does not depend on when the run starts or on which markets have reopened.
+    """
+    return last_trading_day(sp500_index_close())
+
+
 def record_history(positions: list[dict], summary: dict, fx_rates: dict[str, float]) -> None:
     """Append the latest trading day's data point, including the deposit-free portfolio index."""
     source = "scheduled" if os.environ.get("GITHUB_ACTIONS") == "true" else "manual"
     sp500 = sp500_index_close()
-    day = last_trading_day(sp500)
+    day = pricing_day()
     port_index = next_portfolio_index(positions, fx_rates, today=day)
     sp500_eur = None
     if sp500 is not None and not sp500.empty:
         sp500_eur = float(sp500.iloc[-1]) * fx_rates.get("USD", 0.0) or None
-    if append_history(summary, issue_number(), source=source,
+    if append_history(summary, issue_number(day), source=source,
                       port_index=port_index, sp500_eur=sp500_eur, day=day):
         log.info("History updated for %s — total value EUR %.0f, index %.2f (source=%s)",
                  day, summary["total_value_eur"], port_index, source)
@@ -186,7 +195,9 @@ def main() -> None:
         try:
             rows = load_portfolio()
             fx_rates = get_fx_rates()
-            positions, summary, unknown_fx, skipped = fetch_portfolio_data(rows, fx_rates)
+            positions, summary, unknown_fx, skipped = fetch_portfolio_data(
+                rows, fx_rates, as_of=pricing_day(),
+            )
             if skipped:
                 log.warning(
                     "Omitted %d ticker(s): %s",
@@ -221,7 +232,9 @@ def main() -> None:
         fx_rates = get_fx_rates()
 
         log.info("Fetching portfolio market data…")
-        positions, summary, unknown_fx, skipped = fetch_portfolio_data(rows, fx_rates)
+        positions, summary, unknown_fx, skipped = fetch_portfolio_data(
+            rows, fx_rates, as_of=pricing_day(),
+        )
         positions.sort(key=lambda p: p["value_eur"], reverse=True)
 
         cashflows = load_cashflows()
