@@ -8,9 +8,18 @@ from datetime import date
 
 from claude_report import split_title
 from theme import (
-    BG_CREAM, BURGUNDY, CHARCOAL, DARK_GOLD, GOLD, NAVY,
-    RULE_FAINT, SAGE, TEXT_PRIMARY, TEXT_SECONDARY,
+    BG_CREAM,
+    BURGUNDY,
+    CHARCOAL,
+    DARK_GOLD,
+    GOLD,
+    NAVY,
+    RULE_FAINT,
+    SAGE,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
 )
+
 
 # ── Metric interpretations ────────────────────────────────────────────────────
 def interp_sharpe(v):

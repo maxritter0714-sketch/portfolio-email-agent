@@ -7,10 +7,15 @@ import os
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 
 import market
-from analytics import TDAYS, buy_hold_returns, returns_on_calendar, risk_stats, to_weekly
+from analytics import (
+    TDAYS,
+    buy_hold_returns,
+    returns_on_calendar,
+    risk_stats,
+    to_weekly,
+)
 from market import _to_eur_close
 
 log = logging.getLogger(__name__)

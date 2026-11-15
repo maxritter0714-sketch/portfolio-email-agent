@@ -33,10 +33,8 @@ from claude_report import (
     track_record,
 )
 from email_html import build_html_email
-from paths import OUTPUT_DIR
 from market import (
     append_history,
-    last_trading_day,
     compute_allocation_drift,
     fetch_benchmarks,
     fetch_portfolio_data,
@@ -48,9 +46,10 @@ from market import (
     holdings_as_of,
     is_send_saturday,
     issue_number,
+    last_trading_day,
     lifetime_return,
-    load_portfolio,
     load_cashflows,
+    load_portfolio,
     load_targets,
     load_unmapped_isins,
     next_portfolio_index,
@@ -68,6 +67,7 @@ from news import (
     fetch_portfolio_news,
     filter_news_by_relevance,
 )
+from paths import OUTPUT_DIR
 
 # ── Environment ───────────────────────────────────────────────────────────────
 load_dotenv()

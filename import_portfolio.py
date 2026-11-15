@@ -25,13 +25,13 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
-
-from paths import DATA_DIR
 
 from dotenv import load_dotenv
+
+from paths import DATA_DIR
 
 load_dotenv()
 
@@ -193,7 +193,7 @@ def bulk_openfigi_lookup(isins: list[str], verbose: bool = True) -> dict[str, st
                 if attempt == _OPENFIGI_ATTEMPTS:
                     raise OpenFigiUnavailable(str(exc)) from exc
                 time.sleep(2 * attempt)
-        for isin, result in zip(batch, results):
+        for isin, result in zip(batch, results, strict=False):
             if "error" in result or not result.get("data"):
                 out[isin] = None
             else:

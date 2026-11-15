@@ -1,10 +1,10 @@
 ﻿"""Tests for pure functions across the agent modules."""
+from datetime import date as real_date
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
-from datetime import date as real_date
 
 import market
 from claude_report import (
@@ -18,7 +18,12 @@ from claude_report import (
     split_analysis,
     track_record,
 )
-from email_html import _emphasize_numbers, _eur_signed, _markdown_to_html, build_html_email
+from email_html import (
+    _emphasize_numbers,
+    _eur_signed,
+    _markdown_to_html,
+    build_html_email,
+)
 from market import (
     _FX_FALLBACKS,
     _FX_PAIRS,
@@ -47,7 +52,6 @@ from news import (
     _query_name_batches,
     _tag_article_tickers,
 )
-
 
 # ── issue_number ──────────────────────────────────────────────────────────────
 
@@ -1357,6 +1361,7 @@ def test_open_calls_ignore_the_current_issue_on_a_rerun():
 
 def test_track_record_scores_a_call_like_the_dashboard(tmp_path, monkeypatch):
     import csv
+
     from analytics import recommendation_record
     from claude_report import RECOMMENDATION_FIELDS
 

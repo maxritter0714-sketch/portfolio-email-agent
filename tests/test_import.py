@@ -1,8 +1,7 @@
 ﻿"""Tests for pure functions in import_portfolio.py."""
 import pytest
 
-from import_portfolio import parse_german_float, _pick_ticker_from_figi
-
+from import_portfolio import _pick_ticker_from_figi, parse_german_float
 
 # ── parse_german_float ────────────────────────────────────────────────────────
 
@@ -50,6 +49,7 @@ def test_pick_ticker_unknown_exchange():
 
 def test_convert_writes_unmapped_isins(tmp_path, monkeypatch):
     import json
+
     import import_portfolio
 
     export = tmp_path / "export.csv"
@@ -79,6 +79,7 @@ def test_parse_german_float_rejects_an_unreadable_number():
 
 def test_openfigi_outage_raises_instead_of_dropping_holdings(monkeypatch):
     import requests
+
     import import_portfolio
 
     calls = []

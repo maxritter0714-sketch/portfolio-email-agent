@@ -8,23 +8,31 @@ import os
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from datetime import date, datetime as dt, timedelta
+from datetime import date, timedelta
+from datetime import datetime as dt
 from pathlib import Path
 from typing import Any
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from matplotlib.ticker import FuncFormatter
 
 from paths import DATA_DIR
 from theme import (
-    BG_CHART, BURGUNDY, DARK_GOLD, NAVY, SAGE,
-    TEXT_PRIMARY, TEXT_SECONDARY, _PALETTE,
+    _PALETTE,
+    BG_CHART,
+    BURGUNDY,
+    DARK_GOLD,
+    NAVY,
+    SAGE,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
 )
 
 log = logging.getLogger(__name__)
@@ -1087,7 +1095,7 @@ def generate_charts(positions: list[dict], summary: dict,
     bars = ax.barh(list(reversed(names)), list(reversed(vals)),
                    color=list(reversed(colors)), edgecolor=BG_CHART, linewidth=0.6)
     ax.axvline(0, color=TEXT_PRIMARY, linewidth=0.6)
-    for bar, val in zip(bars, reversed(vals)):
+    for bar, val in zip(bars, reversed(vals), strict=True):
         pad = max(abs(val) * 0.02, 0.3)
         ax.text(val + (pad if val >= 0 else -pad),
                 bar.get_y() + bar.get_height() / 2,

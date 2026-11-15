@@ -19,7 +19,8 @@ import math
 import sys
 import warnings
 import webbrowser
-from datetime import date, datetime as dt
+from datetime import date
+from datetime import datetime as dt
 from pathlib import Path
 
 import numpy as np
@@ -46,8 +47,17 @@ from market import (
 from metrics import compute_momentum_scores, risk_free_rate
 from paths import DATA_DIR, OUTPUT_DIR
 from theme import (
-    BG_CHART, BG_CREAM, BURGUNDY, CHARCOAL, DARK_GOLD, GOLD, NAVY, SAGE,
-    TEXT_PRIMARY, TEXT_SECONDARY, _PALETTE,
+    _PALETTE,
+    BG_CHART,
+    BG_CREAM,
+    BURGUNDY,
+    CHARCOAL,
+    DARK_GOLD,
+    GOLD,
+    NAVY,
+    SAGE,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
 )
 
 log = logging.getLogger(__name__)
