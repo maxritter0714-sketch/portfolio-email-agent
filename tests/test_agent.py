@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 import charts
+import history
 import market
 import portfolio_io
 from charts import _prepare_pie
@@ -27,12 +28,12 @@ from email_html import (
     _markdown_to_html,
     build_html_email,
 )
+from history import get_history_ytd
 from market import (
     _FX_FALLBACKS,
     _FX_PAIRS,
     _to_eur_close,
     _window_pct,
-    get_history_ytd,
     get_ticker_classification,
     to_eur_rate,
 )
@@ -819,7 +820,7 @@ def test_get_history_ytd_uses_first_january_row(tmp_path, monkeypatch):
         "2026-01-11,1,101000,5010\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
+    monkeypatch.setattr(history, "_HISTORY_PATH", hist)
     monkeypatch.setattr(market, "date", FakeDate)
     assert get_history_ytd(120_000.0) == pytest.approx(20.0)
 
@@ -836,7 +837,7 @@ def test_get_history_ytd_none_without_january(tmp_path, monkeypatch):
         "2026-02-07,3,110000,5100\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
+    monkeypatch.setattr(history, "_HISTORY_PATH", hist)
     monkeypatch.setattr(market, "date", FakeDate)
     assert get_history_ytd(120_000.0) is None
 
@@ -1045,7 +1046,7 @@ def test_assert_analysis_complete_raises_on_empty_text():
 # ── Deposit-free portfolio index ──────────────────────────────────────────────
 
 def _write_history(path, rows):
-    cols = list(market._HISTORY_COLS)
+    cols = list(history._HISTORY_COLS)
     lines = [",".join(cols)]
     for r in rows:
         lines.append(",".join(str(r.get(c, "")) for c in cols))
@@ -1053,8 +1054,8 @@ def _write_history(path, rows):
 
 
 def test_next_portfolio_index_starts_at_100_without_history(tmp_path, monkeypatch):
-    monkeypatch.setattr(market, "_HISTORY_PATH", tmp_path / "history.csv")
-    assert market.next_portfolio_index([], {"EUR": 1.0}) == 100.0
+    monkeypatch.setattr(history, "_HISTORY_PATH", tmp_path / "history.csv")
+    assert history.next_portfolio_index([], {"EUR": 1.0}) == 100.0
 
 
 def test_next_portfolio_index_chains_price_return_not_deposits(tmp_path, monkeypatch):
@@ -1063,20 +1064,20 @@ def test_next_portfolio_index_chains_price_return_not_deposits(tmp_path, monkeyp
         {"date": "2026-10-10", "total_value_eur": 1000, "source": "scheduled", "port_index": 100},
         {"date": "2026-10-12", "total_value_eur": 9000, "source": "manual", "port_index": 500},
     ])
-    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
+    monkeypatch.setattr(history, "_HISTORY_PATH", hist)
     idx = pd.to_datetime(["2026-10-09", "2026-10-16"])
     monkeypatch.setattr(market, "_hist_cache", {"AAA": pd.Series([10.0, 11.0], index=idx)})
     positions = [{"ticker": "AAA", "shares": 50.0, "currency": "EUR"}]
     # The manual row is ignored; price +10% → index 110 no matter how many shares are held.
-    result = market.next_portfolio_index(positions, {"EUR": 1.0}, today=real_date(2026, 10, 17))
+    result = history.next_portfolio_index(positions, {"EUR": 1.0}, today=real_date(2026, 10, 17))
     assert result == pytest.approx(110.0)
 
 
 def test_next_portfolio_index_same_day_returns_last_value(tmp_path, monkeypatch):
     hist = tmp_path / "history.csv"
     _write_history(hist, [{"date": "2026-10-17", "source": "scheduled", "port_index": 104.5}])
-    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
-    result = market.next_portfolio_index([], {"EUR": 1.0}, today=real_date(2026, 10, 17))
+    monkeypatch.setattr(history, "_HISTORY_PATH", hist)
+    result = history.next_portfolio_index([], {"EUR": 1.0}, today=real_date(2026, 10, 17))
     assert result == 104.5
 
 
@@ -1086,7 +1087,7 @@ def test_history_chart_skips_rows_without_index(tmp_path, monkeypatch):
         {"date": f"2026-0{m}-01", "total_value_eur": 1000, "sp500_close": 5000, "source": "scheduled"}
         for m in range(1, 9)
     ])
-    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
+    monkeypatch.setattr(history, "_HISTORY_PATH", hist)
     assert charts.generate_history_chart() is None
 
 
@@ -1098,7 +1099,7 @@ def test_history_chart_handles_a_year_of_daily_rows(tmp_path, monkeypatch):
          "source": "scheduled", "port_index": 100 + i * 0.1, "sp500_eur": 4500 + i}
         for i, d in enumerate(days)
     ])
-    monkeypatch.setattr(market, "_HISTORY_PATH", hist)
+    monkeypatch.setattr(history, "_HISTORY_PATH", hist)
     assert charts.generate_history_chart() is not None
 
 
@@ -1107,7 +1108,7 @@ def test_history_chart_handles_a_year_of_daily_rows(tmp_path, monkeypatch):
 def test_last_trading_day_uses_last_close_not_run_date():
     friday = pd.to_datetime(["2026-11-12", "2026-11-13"]).tz_localize("America/New_York")
     close = pd.Series([7400.0, 7410.0], index=friday)
-    assert market.last_trading_day(close, fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 13)
+    assert history.last_trading_day(close, fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 13)
 
 
 def test_bars_after_the_pricing_day_are_ignored():
@@ -1145,12 +1146,12 @@ _USD_POS = [{"ticker": "AAA", "currency": "USD"}, {"ticker": "VOD.L", "currency"
 
 def test_history_blockers_empty_when_data_is_complete(monkeypatch):
     monkeypatch.setattr(market, "_fx_fallback_used", {"JPY"})  # not a held currency
-    assert market.history_blockers(_USD_POS, [], [], _SP500) == []
+    assert history.history_blockers(_USD_POS, [], [], _SP500) == []
 
 
 def test_history_blockers_name_every_gap(monkeypatch):
     monkeypatch.setattr(market, "_fx_fallback_used", {"GBP", "JPY"})
-    reasons = market.history_blockers(
+    reasons = history.history_blockers(
         _USD_POS,
         skipped=[{"ticker": "GONE", "name": "Gone", "reason": "no data"}],
         unknown_fx=[{"ticker": "ODD", "name": "Odd", "currency": "XXX"}],
@@ -1210,18 +1211,18 @@ def test_listing_currency_reads_history_metadata_before_giving_up():
 
 
 def test_last_trading_day_falls_back_without_prices():
-    assert market.last_trading_day(None, fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 14)
-    assert market.last_trading_day(pd.Series(dtype=float), fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 14)
+    assert history.last_trading_day(None, fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 14)
+    assert history.last_trading_day(pd.Series(dtype=float), fallback=real_date(2026, 11, 14)) == real_date(2026, 11, 14)
 
 
 def test_append_history_saturday_run_skips_fridays_snapshot(tmp_path, monkeypatch):
-    monkeypatch.setattr(market, "_HISTORY_PATH", tmp_path / "history.csv")
+    monkeypatch.setattr(history, "_HISTORY_PATH", tmp_path / "history.csv")
     monkeypatch.setattr(market, "_hist_cache", {market.SP500_INDEX: pd.Series([7410.0])})
     friday = real_date(2026, 11, 13)
     summary = {"total_value_eur": 32000.0}
-    assert market.append_history(summary, 49, port_index=101.0, sp500_eur=6600.0, day=friday) is True
-    assert market.append_history(summary, 49, port_index=101.0, sp500_eur=6600.0, day=friday) is False
-    rows = market._read_history()
+    assert history.append_history(summary, 49, port_index=101.0, sp500_eur=6600.0, day=friday) is True
+    assert history.append_history(summary, 49, port_index=101.0, sp500_eur=6600.0, day=friday) is False
+    rows = history._read_history()
     assert [(r["date"], r["source"]) for r in rows] == [("2026-11-13", "scheduled")]
 
 

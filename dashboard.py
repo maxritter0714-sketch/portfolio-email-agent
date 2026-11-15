@@ -31,9 +31,9 @@ from dotenv import load_dotenv
 import analytics as an
 from charts import currency_exposure, region_exposure, sector_exposure
 from claude_report import load_recommendations
+from history import _read_history
 from market import (
     BENCHMARK_ETFS,
-    _read_history,
     _to_eur_close,
     fetch_portfolio_data,
     get_fx_rates,

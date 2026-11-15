@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.ticker import FuncFormatter
 
-from market import _read_history
+from history import _read_history
 from portfolio_io import _is_float
 from theme import (
     _PALETTE,

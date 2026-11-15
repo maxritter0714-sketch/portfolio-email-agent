@@ -34,21 +34,23 @@ from claude_report import (
     track_record,
 )
 from email_html import build_html_email
-from market import (
+from history import (
     append_history,
+    get_history_ytd,
+    history_blockers,
+    last_trading_day,
+    next_portfolio_index,
+    value_change_breakdown,
+)
+from market import (
     compute_allocation_drift,
     fetch_benchmarks,
     fetch_portfolio_data,
     fetch_upcoming_events,
     get_fx_rates,
-    get_history_ytd,
-    history_blockers,
-    last_trading_day,
     lifetime_return,
-    next_portfolio_index,
     recommendation_prices,
     sp500_index_close,
-    value_change_breakdown,
 )
 from metrics import (
     compute_advanced_metrics,

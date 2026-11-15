@@ -289,7 +289,8 @@ python tools/readme_screenshots.py                 # needs: pip install playwrig
 | Path | Purpose |
 |---|---|
 | `agent.py` | CLI: schedule check, orchestration, Gmail send |
-| `market.py` | FX, prices, history |
+| `market.py` | FX, prices, benchmarks, events, allocation drift |
+| `history.py` | `data/history.csv`: append a day's row, portfolio index, value change since the first row |
 | `charts.py` | Matplotlib charts for the email; sector, region and currency exposure |
 | `portfolio_io.py` | Loads `data/` files (portfolio, targets, cashflows, unmapped ISINs) and the send cadence |
 | `metrics.py` | Sharpe, beta, momentum, look-through exposure |

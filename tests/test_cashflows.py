@@ -3,8 +3,8 @@ from datetime import date
 
 import pytest
 
-import market
 import portfolio_io
+from history import value_change_breakdown
 from import_cashflows import daily_cashflows
 
 ACCOUNT = "Trade Republic Verrechnungskonto"
@@ -66,7 +66,7 @@ def test_breakdown_splits_change_into_paid_in_and_market():
         {"date": "2026-08-01", "invested_eur": 1000.0, "income_eur": 20.0},
         {"date": "2026-10-23", "invested_eur": 0.0, "income_eur": 0.0},
     ]
-    b = market.value_change_breakdown(32500.0, flows, history, today=date(2026, 10, 28))
+    b = value_change_breakdown(32500.0, flows, history, today=date(2026, 10, 28))
     assert b["since"] == date(2026, 6, 14)
     assert b["change"] == pytest.approx(2500.0)
     assert b["invested"] == pytest.approx(1000.0)
@@ -81,10 +81,10 @@ def test_breakdown_uses_first_row_of_current_year():
         {"date": "2027-01-02", "total_value_eur": "31000"},
     ]
     flows = [{"date": "2027-01-05", "invested_eur": 100.0, "income_eur": 0.0}]
-    b = market.value_change_breakdown(31500.0, flows, history, today=date(2027, 1, 9))
+    b = value_change_breakdown(31500.0, flows, history, today=date(2027, 1, 9))
     assert b["since"] == date(2027, 1, 2)
     assert b["market"] == pytest.approx(400.0)
 
 
 def test_breakdown_none_without_cashflows():
-    assert market.value_change_breakdown(1.0, [], [{"date": "2026-01-01", "total_value_eur": "1"}]) is None
+    assert value_change_breakdown(1.0, [], [{"date": "2026-01-01", "total_value_eur": "1"}]) is None
