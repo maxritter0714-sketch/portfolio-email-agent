@@ -314,6 +314,41 @@ def test_classify_news_does_not_call_an_unmatched_headline_economy():
     assert _classify_news("Volcano erupts on remote island") == "WORLD"
 
 
+_FULL_ANALYSIS = (
+    "## (1) Portfolio Performance Summary\nUp on the fortnight.\n\n"
+    "## (2) Benchmark Comparison\nBehind all three.\n\n"
+    "## (3) News & Market Context\n[IMPLICATION] Rates — Matter for growth names.\n\n"
+    "## (4) Actionable Suggestions\n[TRIM] Reduce NVDA — Too big.\n"
+)
+
+
+def test_assert_report_sections_accepts_a_full_report():
+    from claude_report import assert_report_sections
+    body, actionable = split_analysis(_FULL_ANALYSIS)
+    assert_report_sections(body, parse_actionable(actionable))
+
+
+def test_assert_report_sections_rejects_a_missing_or_empty_section():
+    from claude_report import assert_report_sections
+    without_benchmarks = _FULL_ANALYSIS.replace("## (2) Benchmark Comparison\nBehind all three.\n\n", "")
+    body, actionable = split_analysis(without_benchmarks)
+    with pytest.raises(RuntimeError, match="2 of its 3 sections"):
+        assert_report_sections(body, parse_actionable(actionable))
+
+    empty_section = _FULL_ANALYSIS.replace("Behind all three.", "")
+    body, actionable = split_analysis(empty_section)
+    with pytest.raises(RuntimeError, match="2 of its 3 sections"):
+        assert_report_sections(body, parse_actionable(actionable))
+
+
+def test_assert_report_sections_rejects_an_actionable_section_without_items():
+    from claude_report import assert_report_sections
+    prose_only = _FULL_ANALYSIS.replace("[TRIM] Reduce NVDA — Too big.", "Nothing to do this fortnight.")
+    body, actionable = split_analysis(prose_only)
+    with pytest.raises(RuntimeError, match="no readable"):
+        assert_report_sections(body, parse_actionable(actionable))
+
+
 # ── Recommendation log ────────────────────────────────────────────────────────
 
 _ITEMS = [

@@ -340,6 +340,28 @@ def _assert_analysis_complete(text: str) -> None:
         )
 
 
+def assert_report_sections(body: str, actionable_items: list[dict]) -> None:
+    """Raise unless the analysis has its three prose sections and a readable actionable one.
+
+    `body` and `actionable_items` are what `split_analysis` and
+    `parse_actionable` made of Claude's answer.
+    """
+    filled = [
+        sec for sec in re.split(r"^##\s+", body, flags=re.MULTILINE)[1:]
+        if "\n" in sec.strip()
+    ]
+    if len(filled) < 3:
+        raise RuntimeError(
+            f"Analysis has {len(filled)} of its 3 sections before the actionable one. "
+            "Aborting to avoid sending an incomplete email."
+        )
+    if not actionable_items:
+        raise RuntimeError(
+            "Analysis has no readable [ACTION] item in the actionable section. "
+            "Aborting to avoid sending an incomplete email."
+        )
+
+
 def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, prior_calls: list[dict] | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None, events: list[dict] | None = None, allocation: list[dict] | None = None) -> str:
     """Return Claude's analysis as markdown (sections 1-4)."""
     client = anthropic.Anthropic()

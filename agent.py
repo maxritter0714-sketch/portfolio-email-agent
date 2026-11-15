@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 from claude_report import (
     _assert_analysis_complete,
     append_recommendations,
+    assert_report_sections,
     call_claude,
     call_claude_headline,
     parse_actionable,
@@ -321,6 +322,7 @@ def main() -> None:
         _assert_analysis_complete(analysis_raw)
         analysis_body, actionable_raw = split_analysis(analysis_raw)
         actionable_items = parse_actionable(actionable_raw)
+        assert_report_sections(analysis_body, actionable_items)
         if args.preview:
             log.info("Preview — recommendations.csv left unchanged")
         else:
