@@ -330,6 +330,28 @@ def test_stress_test_fills_unlisted_names_with_benchmark():
     assert detail.loc["B", "filled"] and not detail.loc["A", "filled"]
 
 
+def test_stress_test_fills_each_unlisted_name_with_its_own_return():
+    idx = pd.to_datetime(["2024-01-02", "2024-01-10"])
+    prices = pd.DataFrame({"A": [10.0, 8.0], "B": [np.nan, 5.0], "C": [np.nan, 5.0]}, index=idx)
+    weights = pd.Series({"A": 0.5, "B": 0.25, "C": 0.25})
+    fill = pd.Series({"A": -0.9, "B": -0.3, "C": -0.1})  # A is listed, so its fill is unused
+    ret, detail = stress_test(prices, weights, idx[0], idx[1], fill=fill)
+    assert ret == pytest.approx(0.5 * -0.2 + 0.25 * -0.3 + 0.25 * -0.1)
+    assert detail.loc["B", "ret"] == pytest.approx(-0.3)
+
+
+def test_betas_scale_with_the_benchmark():
+    from analytics import betas
+    idx = pd.bdate_range("2025-01-01", periods=250)
+    rng = np.random.default_rng(1)
+    bench = pd.Series(rng.normal(0, 0.01, 250), index=idx)
+    returns = pd.DataFrame({"DOUBLE": 2 * bench, "SAME": bench, "SHORT": bench.where(idx > idx[-30])})
+    out = betas(returns, bench)
+    # Weekly compounding keeps twice the daily return from being exactly twice the weekly one.
+    assert out["DOUBLE"] == pytest.approx(2.0, abs=0.02) and out["SAME"] == pytest.approx(1.0)
+    assert "SHORT" not in out
+
+
 def test_order_costs_totals_and_trailing_year():
     flows = [
         dict(date="2025-06-01", invested_eur=900.0, income_eur=0.0, orders=4),

@@ -165,15 +165,22 @@ def _costs(positions: list[dict], total_value: float) -> dict:
 
 
 def _stress(prices: pd.DataFrame, bench_prices: pd.DataFrame, weights: pd.Series,
-            total_value: float) -> list[dict]:
-    """Today's portfolio through each past sell-off; unlisted names take the MSCI World's return."""
+            total_value: float, world_betas: pd.Series) -> list[dict]:
+    """Today's portfolio through each past sell-off.
+
+    A name not listed yet takes the MSCI World's return times its own beta to
+    it (`world_betas`), so a high-beta name is not assumed to fall only as far
+    as the market. Without a beta it takes the MSCI World's return.
+    """
     out = []
     for key, label, start, end in STRESS_SCENARIOS:
         t0, t1 = pd.Timestamp(start), pd.Timestamp(end)
         bench = an.window_returns(bench_prices, t0, t1)
         if bench.isna().any():
             continue
-        ret, detail = an.stress_test(prices, weights, t0, t1, fill=float(bench["world"]))
+        world = float(bench["world"])
+        fill = (world_betas.reindex(weights.index) * world).fillna(world).clip(lower=-1.0)
+        ret, detail = an.stress_test(prices, weights, t0, t1, fill=fill)
         worst = detail.sort_values("contrib").head(5)
         out.append(dict(
             key=key, label=label, start=start, end=end,
@@ -321,7 +328,8 @@ def build_payload(
             recs or [], prices if rec_prices is None else prices.join(rec_prices, how="outer"),
             bench_prices["world"]),
         correlation=dict(tickers=ordered, matrix=corr.round(3).to_numpy().tolist()),
-        stress=_stress(prices, bench_prices, weights, total_value),
+        stress=_stress(prices, bench_prices, weights, total_value,
+                       an.betas(returns_1y, world_ret[world_ret.index > one_year])),
         whatif=_whatif(prices, bench_prices, end),
         simulation=dict(
             value=total_value,

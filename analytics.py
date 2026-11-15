@@ -293,6 +293,20 @@ def position_risk(returns: pd.DataFrame, port: pd.Series, sp500: pd.Series) -> p
     return pd.DataFrame.from_dict(rows, orient="index")
 
 
+def betas(returns: pd.DataFrame, bench: pd.Series) -> pd.Series:
+    """Beta of each column to `bench`, on weekly returns; names with under 60 daily returns are left out."""
+    out = {}
+    for ticker in returns.columns:
+        r = returns[ticker].dropna()
+        if len(r) < 60:
+            continue
+        df = to_weekly(pd.concat({"r": r, "b": bench}, axis=1).dropna()).dropna()
+        var_b = df["b"].var()
+        if var_b:
+            out[ticker] = float(df["r"].cov(df["b"]) / var_b)
+    return pd.Series(out, dtype=float)
+
+
 def risk_contributions(returns: pd.DataFrame, weights: pd.Series) -> tuple[pd.Series, float, float]:
     """Each name's share of portfolio variance, plus portfolio volatility and diversification ratio.
 
@@ -473,10 +487,11 @@ def window_returns(prices: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp)
 
 
 def stress_test(prices: pd.DataFrame, weights: pd.Series, start: pd.Timestamp, end: pd.Timestamp,
-                fill: float) -> tuple[float, pd.DataFrame]:
+                fill: float | pd.Series) -> tuple[float, pd.DataFrame]:
     """Today's weights through a past episode, held without trading.
 
-    Names not yet listed at `start` get `fill` (the benchmark's return) and are flagged.
+    Names not yet listed at `start` get `fill` and are flagged: one return for
+    all of them, or a return per name (e.g. the benchmark's scaled by beta).
     Returns the portfolio return and a frame of ret / contrib / filled per name.
     """
     ret = window_returns(prices.reindex(columns=weights.index), start, end)
