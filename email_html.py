@@ -699,7 +699,7 @@ def build_html_email(
         ("portfolio_pie", "Portfolio Allocation"),
         ("sector_pie",    "Sector Allocation"),
         ("geo_pie",       "Geographic Allocation"),
-        ("movers_bar",    "Top & Bottom Movers (YTD)"),
+        ("movers_bar",    "Top & Bottom Movers (Fortnight)"),
     ]
     figs_html = ""
     n = 1

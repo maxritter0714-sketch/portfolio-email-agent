@@ -248,13 +248,13 @@ def generate_charts(positions: list[dict], summary: dict,
     _pie(ax, sizes, labels)
     charts["geo_pie"] = _save_fig(fig, "geo_pie")
 
-    # 4. Top & Bottom movers (YTD)
-    by_ytd = sorted(positions, key=lambda p: p["ytd_pct"])
-    bottom5 = by_ytd[:5]
-    top5 = list(reversed(by_ytd[-5:]))
+    # 4. Top & bottom movers of the fortnight the issue covers
+    by_fortnight = sorted(positions, key=lambda p: p["fortnight_pct"])
+    bottom5 = by_fortnight[:5]
+    top5 = list(reversed(by_fortnight[-5:]))
     movers = top5 + bottom5
     names = [p["ticker"] for p in movers]
-    vals = [p["ytd_pct"] for p in movers]
+    vals = [p["fortnight_pct"] for p in movers]
     colors = [SAGE if v >= 0 else BURGUNDY for v in vals]
 
     fig, ax = plt.subplots(figsize=(7, 5))
@@ -268,7 +268,8 @@ def generate_charts(positions: list[dict], summary: dict,
                 f"{val:+.1f}%", va="center",
                 ha="left" if val >= 0 else "right",
                 fontsize=9, color=TEXT_PRIMARY, fontfamily="serif")
-    ax.set_xlabel("YTD Return (%)", fontsize=10, fontfamily="serif")
+    ax.margins(x=0.14)  # room for the value labels beside the longest bars
+    ax.set_xlabel("2W Return (%)", fontsize=10, fontfamily="serif")
     ax.tick_params(labelsize=10)
     for spine in ("top", "right", "left"):
         ax.spines[spine].set_visible(False)
