@@ -51,7 +51,8 @@ BENCHMARK_ETFS: dict[str, tuple[str, str]] = {
 # dividend-adjusted ETF closes do not.
 SP500_INDEX = "^GSPC"
 
-_hist_cache: dict = {}
+# Closes fetched during this run, by symbol, so no series is downloaded twice.
+_hist_cache: dict[str, pd.Series] = {}
 
 plt.rcParams.update({
     "font.family": "serif",
@@ -318,6 +319,17 @@ def to_eur_rate(currency: str, fx_rates: dict[str, float]) -> tuple[float, bool]
 
 
 _fx_hist_cache: dict[str, pd.Series | None] = {}
+
+
+def cached_closes(symbol: str) -> pd.Series | None:
+    """Closes this run already fetched for `symbol`, or None."""
+    return _hist_cache.get(symbol)
+
+
+def clear_price_caches() -> None:
+    """Forget every cached price and FX series, so the next lookup fetches again."""
+    _hist_cache.clear()
+    _fx_hist_cache.clear()
 
 
 def _naive_dates(series: pd.Series) -> pd.Series:

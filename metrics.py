@@ -186,7 +186,7 @@ def compute_momentum_scores(positions: list[dict], fx_rates: dict[str, float]) -
     scored: list[dict] = []
     unscored: list[dict] = []
     for p in positions:
-        close = market._hist_cache.get(p["ticker"])
+        close = market.cached_closes(p["ticker"])
         if close is None:
             continue
         eur = _to_eur_close(close, p.get("currency", "USD"), fx_rates).dropna()
