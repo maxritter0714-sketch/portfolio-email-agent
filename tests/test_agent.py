@@ -308,6 +308,12 @@ def test_news_ticker_mention_needs_capitals():
     assert not _ticker_mentioned("asml rallied", "ASML.AS")
 
 
+def test_classify_news_does_not_call_an_unmatched_headline_economy():
+    from news import _classify_news
+    assert _classify_news("Inflation cools as the Fed holds its rate") == "ECONOMY"
+    assert _classify_news("Volcano erupts on remote island") == "WORLD"
+
+
 # ── Recommendation log ────────────────────────────────────────────────────────
 
 _ITEMS = [

@@ -334,6 +334,7 @@ def _matches_macro(title: str) -> bool:
 
 
 def _classify_news(title: str) -> str:
+    """POLITICS, SCIENCE or ECONOMY by keyword count; WORLD when no keyword matches."""
     t = title.lower()
     p = len(_POLITICS_RE.findall(t))
     s = len(_SCIENCE_RE.findall(t))
@@ -342,7 +343,7 @@ def _classify_news(title: str) -> str:
         return "POLITICS"
     if s > e and s > 0:
         return "SCIENCE"
-    return "ECONOMY"
+    return "ECONOMY" if e > 0 else "WORLD"
 
 
 def _is_dup(title: str, kept: list[str], threshold: float = 0.8) -> bool:

@@ -737,8 +737,8 @@ def build_html_email(
     cat_color = {"POLITICS": BURGUNDY, "ECONOMY": SAGE, "SCIENCE": NAVY}
     gen_news_html = ""
     for a in gen_news:
-        cat = a.get("category", "ECONOMY")
-        color = cat_color.get(cat, SAGE)
+        cat = a.get("category", "WORLD")
+        color = cat_color.get(cat, TEXT_SECONDARY)
         gen_news_html += (
             f'<table width="100%" cellpadding="0" cellspacing="0" '
             f'style="margin-bottom:22px;border-bottom:1px solid {RULE_FAINT}">'
