@@ -31,15 +31,15 @@ HOLDINGS = [
     ("SXR8.DE", "iShares Core S&P 500 UCITS ETF", "EUR", 14),
     ("EUNL.DE", "iShares Core MSCI World UCITS ETF", "EUR", 55),
     ("IS3N.DE", "iShares Core MSCI EM IMI UCITS ETF", "EUR", 120),
-    ("AAPL", "Apple", "USD", 18),
+    ("AAPL", "Apple", "USD", 24),
     ("MSFT", "Microsoft", "USD", 9),
-    ("NVDA", "NVIDIA", "USD", 30),
-    ("AMZN", "Amazon", "USD", 16),
-    ("GOOGL", "Alphabet", "USD", 14),
-    ("ASML.AS", "ASML Holding", "EUR", 4),
-    ("SAP.DE", "SAP", "EUR", 10),
-    ("ALV.DE", "Allianz", "EUR", 7),
-    ("TSM", "Taiwan Semiconductor", "USD", 12),
+    ("NVDA", "NVIDIA", "USD", 6),
+    ("AMZN", "Amazon", "USD", 22),
+    ("GOOGL", "Alphabet", "USD", 4),
+    ("ASML.AS", "ASML Holding", "EUR", 2),
+    ("SAP.DE", "SAP", "EUR", 20),
+    ("ALV.DE", "Allianz", "EUR", 15),
+    ("TSM", "Taiwan Semiconductor", "USD", 9),
 ]
 MONTHLY_SAVINGS_EUR = 600.0
 PLAN_START = date(2023, 1, 2)
