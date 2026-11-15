@@ -8,7 +8,8 @@ Stack: Python · yfinance · NewsAPI · Anthropic Claude · Gmail SMTP
 | File | Purpose |
 |---|---|
 | `agent.py` | CLI: schedule, orchestration, Gmail send |
-| `market.py` | FX, prices, history, charts |
+| `market.py` | FX, prices, history |
+| `charts.py` | Matplotlib charts for the email; sector, region and currency exposure |
 | `portfolio_io.py` | Loads `data/` files (portfolio, targets, cashflows, unmapped ISINs) and the send cadence |
 | `metrics.py` | Sharpe/beta/momentum/look-through |
 | `dashboard.py` | CLI: builds the interactive dashboard `output/dashboard.html` (prices only, no Claude) |

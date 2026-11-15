@@ -6,8 +6,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import charts
 import market
 import portfolio_io
+from charts import _prepare_pie
 from claude_report import (
     _assert_analysis_complete,
     _value_vs_jan_line,
@@ -28,7 +30,6 @@ from email_html import (
 from market import (
     _FX_FALLBACKS,
     _FX_PAIRS,
-    _prepare_pie,
     _to_eur_close,
     _window_pct,
     get_history_ytd,
@@ -1086,7 +1087,7 @@ def test_history_chart_skips_rows_without_index(tmp_path, monkeypatch):
         for m in range(1, 9)
     ])
     monkeypatch.setattr(market, "_HISTORY_PATH", hist)
-    assert market.generate_history_chart() is None
+    assert charts.generate_history_chart() is None
 
 
 def test_history_chart_handles_a_year_of_daily_rows(tmp_path, monkeypatch):
@@ -1098,7 +1099,7 @@ def test_history_chart_handles_a_year_of_daily_rows(tmp_path, monkeypatch):
         for i, d in enumerate(days)
     ])
     monkeypatch.setattr(market, "_HISTORY_PATH", hist)
-    assert market.generate_history_chart() is not None
+    assert charts.generate_history_chart() is not None
 
 
 # ── Daily snapshot: rows dated by trading day ─────────────────────────────────

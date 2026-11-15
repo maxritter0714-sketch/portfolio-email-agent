@@ -29,17 +29,15 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 import analytics as an
+from charts import currency_exposure, region_exposure, sector_exposure
 from claude_report import load_recommendations
 from market import (
     BENCHMARK_ETFS,
     _read_history,
     _to_eur_close,
-    currency_exposure,
     fetch_portfolio_data,
     get_fx_rates,
     lifetime_return,
-    region_exposure,
-    sector_exposure,
 )
 from metrics import compute_momentum_scores, risk_free_rate
 from paths import DATA_DIR, OUTPUT_DIR

@@ -30,8 +30,8 @@ from analytics import (
     window_returns,
     xirr,
 )
+from charts import currency_exposure, region_exposure, sector_exposure
 from dashboard import _json_ready, render_html
-from market import currency_exposure, region_exposure, sector_exposure
 
 
 def _days(n, start="2024-01-01"):

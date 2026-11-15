@@ -22,6 +22,7 @@ from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
 
+from charts import generate_charts
 from claude_report import (
     _assert_analysis_complete,
     append_recommendations,
@@ -39,7 +40,6 @@ from market import (
     fetch_benchmarks,
     fetch_portfolio_data,
     fetch_upcoming_events,
-    generate_charts,
     get_fx_rates,
     get_history_ytd,
     history_blockers,
