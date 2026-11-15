@@ -1412,12 +1412,17 @@ def test_prompt_lists_open_calls_against_the_msci_world():
     text = _build_prior_calls_context([
         dict(ticker="UP", action="TRIM", report=44, date="2026-09-05",
              ret=0.10, bench_ret=0.20, excess=-0.10, hit=True, held=True),
+        dict(ticker="RAN", action="TRIM", report=45, date="2026-09-19",
+             ret=0.10, bench_ret=0.03, excess=0.07, hit=False, held=True),
         dict(ticker="GONE", action="EXIT", report=44, date="2026-09-05",
              ret=None, bench_ret=0.20, excess=None, hit=None, held=False),
     ])
     assert "UP: TRIM (first made in Report #44, 2026-09-05)" in text
-    assert "+10.0% since first made, MSCI World +20.0%, -10.0 points relative" in text
-    assert "GONE: EXIT" in text and "no longer in portfolio" in text
+    assert ("+10.0% since first made, MSCI World +20.0%, -10.0 points relative"
+            " — call right so far") in text
+    assert "+7.0 points relative — call wrong so far" in text
+    assert text.endswith("GONE: EXIT (first made in Report #44, 2026-09-05) — no longer in portfolio")
+    assert "a TRIM or EXIT is right when it lagged it" in text
     assert _build_prior_calls_context([]) == ""
 
 

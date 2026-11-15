@@ -246,12 +246,18 @@ def _build_prior_calls_context(prior_calls: list[dict] | None) -> str:
                     f", MSCI World {_pct(r['bench_ret'])}, "
                     f"{r['excess'] * 100:+.1f} points relative"
                 )
+            if r.get("hit") is not None:
+                outcome += f" — call {'right' if r['hit'] else 'wrong'} so far"
         lines.append(
             f"- {r['ticker']}: {r['action']} (first made in Report #{r['report']}, "
             f"{r['date']}) — {outcome}"
         )
     return (
         "\n\nPRIOR RECOMMENDATIONS (still open; euro returns, dividends included)\n"
+        "An ADD is right when the holding beat the MSCI World since the call; a TRIM or "
+        "EXIT is right when it lagged it. Each line states the verdict: never describe a "
+        "call marked wrong as having worked or added value, nor one marked right as "
+        "having failed.\n"
         + "\n".join(lines)
     )
 
