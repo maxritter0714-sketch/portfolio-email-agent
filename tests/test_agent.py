@@ -616,7 +616,10 @@ def test_prompt_momentum_block_ranks_only_scored_names():
                     r1m=0.01, r3m=0.02, r6m=None, r12m=None)
     summary = dict(total_value_eur=1000.0, total_pl_eur=0.0, total_pl_pct=0.0, weekly_pct=0.0,
                    fortnight_pct=0.0, monthly_pct=0.0, ytd_pct=0.0)
-    text = _build_user_context([], summary, [], [], [], {}, momentum=[ranked, unranked])
+    text = _build_user_context(
+        positions=[], summary=summary, benchmarks=[], port_news=[], gen_news=[],
+        metrics={}, momentum=[ranked, unranked],
+    )
     assert "Old Co (OLD): Q1 | 1M +1.0% 3M +2.0% 6M +3.0% 12M +4.0%" in text
     assert "New Co" not in text
 

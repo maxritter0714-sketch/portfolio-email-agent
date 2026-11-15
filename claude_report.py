@@ -67,7 +67,20 @@ def _metric(metrics: dict, key: str, spec: str = ".2f", scale: float = 1.0) -> s
 
 
 # ── Claude analysis ───────────────────────────────────────────────────────────
-def _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, prior_calls: list[dict] | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None, events: list[dict] | None = None, allocation: list[dict] | None = None) -> str:
+def _build_user_context(
+    *,
+    positions: list[dict],
+    summary: dict,
+    benchmarks: list[dict],
+    port_news: list[dict],
+    gen_news: list[dict],
+    metrics: dict,
+    prior_calls: list[dict] | None = None,
+    momentum: list[dict] | None = None,
+    lookthrough: list[dict] | None = None,
+    events: list[dict] | None = None,
+    allocation: list[dict] | None = None,
+) -> str:
     positions_text = "\n".join(
         f"- {p['name']} ({p['ticker']}): {p['shares']:.4g} shares | "
         f"current €{p['price_eur']:.2f} | "
@@ -362,13 +375,31 @@ def assert_report_sections(body: str, actionable_items: list[dict]) -> None:
         )
 
 
-def call_claude(positions, summary, benchmarks, port_news, gen_news, metrics, prior_calls: list[dict] | None = None, momentum: list[dict] | None = None, lookthrough: list[dict] | None = None, events: list[dict] | None = None, allocation: list[dict] | None = None) -> str:
+def call_claude(
+    *,
+    positions: list[dict],
+    summary: dict,
+    benchmarks: list[dict],
+    port_news: list[dict],
+    gen_news: list[dict],
+    metrics: dict,
+    prior_calls: list[dict] | None = None,
+    momentum: list[dict] | None = None,
+    lookthrough: list[dict] | None = None,
+    events: list[dict] | None = None,
+    allocation: list[dict] | None = None,
+) -> str:
     """Return Claude's analysis as markdown (sections 1-4)."""
     client = anthropic.Anthropic()
 
     system_prompt = "\n\n".join([_PROMPT_PERSONA, _PROMPT_STRUCTURE, _PROMPT_FORMATTING])
 
-    user_content = _build_user_context(positions, summary, benchmarks, port_news, gen_news, metrics, prior_calls, momentum, lookthrough, events, allocation)
+    user_content = _build_user_context(
+        positions=positions, summary=summary, benchmarks=benchmarks,
+        port_news=port_news, gen_news=gen_news, metrics=metrics,
+        prior_calls=prior_calls, momentum=momentum, lookthrough=lookthrough,
+        events=events, allocation=allocation,
+    )
 
     log.info("Calling Claude API for analysis (model: %s)…", claude_model())
     response = client.messages.create(

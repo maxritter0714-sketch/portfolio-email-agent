@@ -316,8 +316,10 @@ def main() -> None:
         rec_prices, world_close = recommendation_prices(positions, fx_rates)
         scorecard = track_record(positions, rec_prices, world_close, before_issue=current_issue)
         analysis_raw = call_claude(
-            positions, summary, benchmarks, port_news, gen_news, metrics,
-            scorecard, momentum_data, lookthrough_data, events, allocation,
+            positions=positions, summary=summary, benchmarks=benchmarks,
+            port_news=port_news, gen_news=gen_news, metrics=metrics,
+            prior_calls=scorecard, momentum=momentum_data,
+            lookthrough=lookthrough_data, events=events, allocation=allocation,
         )
         _assert_analysis_complete(analysis_raw)
         analysis_body, actionable_raw = split_analysis(analysis_raw)
