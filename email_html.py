@@ -658,12 +658,24 @@ def build_html_email(
         return (
             f'<th{cls_attr} style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
             f'text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};'
-            f'text-align:{align};padding:10px 4px;border-bottom:1px solid {TEXT_PRIMARY};'
+            f'text-align:{align};padding:10px 4px;white-space:nowrap;border-bottom:1px solid {TEXT_PRIMARY};'
             f'font-weight:600">{label}</th>'
         )
 
+    def _num_td(text: str, color: str = TEXT_PRIMARY, cls: str = "") -> str:
+        cls_attr = f' class="{cls}"' if cls else ""
+        return (
+            f'<td{cls_attr} style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
+            f'font-family:Arial,Helvetica,sans-serif;font-size:12px;text-align:right;'
+            f'white-space:nowrap;font-variant-numeric:tabular-nums;color:{color}">{text}</td>'
+        )
+
+    def _pct_td(value: float, cls: str = "") -> str:
+        return _num_td(_fmt(value), _color(value), cls)
+
     pos_rows_html = ""
     for p in positions:
+        weight = p["value_eur"] / total * 100 if total else 0.0
         pos_rows_html += (
             f'<tr>'
             f'<td class="pos-name-cell" style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
@@ -672,19 +684,13 @@ def build_html_email(
             f' <span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
             f'color:{TEXT_SECONDARY};letter-spacing:1px;margin-left:6px">{html.escape(p["ticker"])}</span>'
             f'</td>'
-            f'<td class="hide-mobile" style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
-            f'font-family:Arial,Helvetica,sans-serif;font-size:13px;text-align:right;'
-            f'font-variant-numeric:tabular-nums;color:{TEXT_PRIMARY}">{p["shares"]:.2f}</td>'
-            f'<td style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
-            f'font-family:Arial,Helvetica,sans-serif;font-size:13px;text-align:right;'
-            f'font-variant-numeric:tabular-nums;color:{TEXT_PRIMARY}">€{p["value_eur"]:,.0f}</td>'
-            f'<td style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
-            f'font-family:Arial,Helvetica,sans-serif;font-size:13px;text-align:right;'
-            f'font-variant-numeric:tabular-nums;color:{_color(p["pl_pct"])}">{_fmt(p["pl_pct"])}</td>'
-            f'<td style="padding:12px 4px;border-bottom:1px solid {RULE_FAINT};'
-            f'font-family:Arial,Helvetica,sans-serif;font-size:13px;text-align:right;'
-            f'font-variant-numeric:tabular-nums;color:{_color(p["ytd_pct"])}">{_fmt(p["ytd_pct"])}</td>'
-            f'</tr>'
+            + _num_td(f'{weight:.1f}%', cls="hide-mobile")
+            + _num_td(f'€{p["value_eur"]:,.0f}')
+            + _pct_td(p["fortnight_pct"])
+            + _pct_td(p["monthly_pct"], "hide-mobile")
+            + _pct_td(p["ytd_pct"])
+            + _pct_td(p["pl_pct"])
+            + '</tr>'
         )
 
     # ── By the Numbers (charts) ───────────────────────────────────────────────
@@ -937,10 +943,12 @@ def build_html_email(
   <table width="100%" cellpadding="0" cellspacing="0">
     <thead><tr>
       {_th("Holding", "left")}
-      {_th("Shares", "right", "hide-mobile")}
+      {_th("Weight", "right", "hide-mobile")}
       {_th("Value", "right")}
-      {_th("P&amp;L", "right")}
+      {_th("2W", "right")}
+      {_th("1M", "right", "hide-mobile")}
       {_th("YTD", "right")}
+      {_th("P&amp;L", "right")}
     </tr></thead>
     <tbody>{pos_rows_html}</tbody>
   </table>

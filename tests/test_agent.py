@@ -1530,3 +1530,21 @@ def test_risk_panel_says_it_describes_todays_holdings_and_marks_missing_values()
     assert "2.0%/yr above what beta explains" in html_out
     assert "Low position concentration" in html_out
     assert "Well diversified" not in html_out and "Outperforms" not in html_out
+
+
+# ── Positions table ───────────────────────────────────────────────────────────
+
+def test_positions_table_shows_weight_and_window_returns():
+    position = dict(
+        ticker="AAA", name="Alpha", value_eur=2_500.0,
+        fortnight_pct=1.5, monthly_pct=-2.5, ytd_pct=12.0, pl_pct=30.0,
+    )
+    html_out = _minimal_email(positions=[position])
+    header = html_out[html_out.index("<thead>"):html_out.index("</thead>")]
+    places = [header.index(f">{label}</th>")
+              for label in ("Holding", "Weight", "Value", "2W", "1M", "YTD", "P&amp;L")]
+    assert places == sorted(places)
+    assert "Shares" not in header
+    row = html_out[html_out.index("<tbody>"):html_out.index("</tbody>")]
+    for cell in (">25.0%<", ">€2,500<", ">+1.50%<", ">-2.50%<", ">+12.00%<", ">+30.00%<"):
+        assert cell in row
