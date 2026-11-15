@@ -76,14 +76,18 @@ def _portfolio(px: pd.DataFrame) -> float:
     return cost
 
 
+def _deposit_days(today: date) -> list[date]:
+    """The day of each monthly deposit since the plan began."""
+    return [m.date() + timedelta(days=1) for m in pd.date_range(PLAN_START, today, freq="MS")]
+
+
 def _cashflows(cost: float, today: date) -> None:
     """A monthly savings plan whose deposits add up to the cost basis, plus a few dividends."""
-    months = pd.date_range(PLAN_START, today, freq="MS")
-    per_month = round(cost / len(months), 2)
+    days = _deposit_days(today)
+    per_month = round(cost / len(days), 2)
     rows = []
-    for i, m in enumerate(months):
-        day = m.date() + timedelta(days=1)
-        income = round(per_month * 0.04, 2) if m.month in (3, 6, 9, 12) else 0.0
+    for i, day in enumerate(days):
+        income = round(per_month * 0.04, 2) if day.month in (3, 6, 9, 12) else 0.0
         orders = 1 if i % 5 == 0 else 0  # an occasional one-off order on top of the plan
         rows.append([day.isoformat(), per_month, income, orders])
     _write_csv(DEMO_DIR / "cashflows.csv", ["date", "invested_eur", "income_eur", "orders"], rows)
@@ -92,8 +96,13 @@ def _cashflows(cost: float, today: date) -> None:
 def _history(px: pd.DataFrame, today: date) -> None:
     recent = px[px.index < pd.Timestamp(today)].tail(HISTORY_DAYS)  # closed sessions only
     shares = pd.Series({h[0]: h[3] for h in HOLDINGS})
-    value = (recent[shares.index] * shares).sum(axis=1)
-    port_index = 100 * value / value.iloc[0]
+    full = (recent[shares.index] * shares).sum(axis=1)
+    port_index = 100 * full / full.iloc[0]  # deposit-free, so today's shares throughout
+    # The position grows with the savings plan, so the value matches cashflows.csv.
+    days = _deposit_days(today)
+    paid_in = pd.Series([sum(d <= ts.date() for d in days) / len(days) for ts in recent.index],
+                        index=recent.index)
+    value = full * paid_in
     rows = []
     for ts in recent.index:
         d = ts.date()
