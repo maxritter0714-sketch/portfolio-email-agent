@@ -498,7 +498,7 @@ def _unique_ticker(hits: list[str]) -> str | None:
 
 
 def match_action_ticker(item: dict, positions: list[dict]) -> str | None:
-    """Ticker for an actionable line: symbol first, then company name.
+    """Ticker for an actionable line: symbol first (in capitals), then company name.
 
     Name matching uses the first significant word (e.g. Nvidia → NVDA).
     Ambiguous hits (two holdings in one line) return None.
@@ -509,7 +509,9 @@ def match_action_ticker(item: dict, positions: list[dict]) -> str | None:
 
     ticker_hits: list[str] = []
     for haystack in (title, combined):
-        ticker_hits = [p["ticker"] for p in positions if _word_in(haystack, p["ticker"])]
+        ticker_hits = [
+            p["ticker"] for p in positions if _word_in(haystack, p["ticker"], case_sensitive=True)
+        ]
         if ticker_hits:
             break
 

@@ -288,6 +288,26 @@ def test_match_action_ticker_ignores_short_name_token():
     assert match_action_ticker(item, [sap]) is None
 
 
+def test_match_action_ticker_needs_the_symbol_in_capitals():
+    now = {"ticker": "NOW", "name": "ServiceNow", "price_eur": 800.0}
+    grab = {"ticker": "GRAB", "name": "Grab Holdings", "price_eur": 4.0}
+    lower = {"title": "Take profits now", "detail": "Do not grab at falling knives."}
+    assert match_action_ticker(lower, [now]) is None
+    upper = {"title": "Trim NOW", "detail": "Valuation is stretched."}
+    assert match_action_ticker(upper, [now, grab]) == "NOW"
+    # The company name still matches in any case.
+    by_name = {"title": "Exit grab holdings", "detail": ""}
+    assert match_action_ticker(by_name, [now, grab]) == "GRAB"
+
+
+def test_news_ticker_mention_needs_capitals():
+    from news import _ticker_mentioned
+    assert _ticker_mentioned("Shares of NOW jumped", "NOW")
+    assert not _ticker_mentioned("Markets are calm for now", "NOW")
+    assert _ticker_mentioned("ASML.AS rallied", "ASML.AS") and _ticker_mentioned("ASML rallied", "ASML.AS")
+    assert not _ticker_mentioned("asml rallied", "ASML.AS")
+
+
 # ── Recommendation log ────────────────────────────────────────────────────────
 
 _ITEMS = [

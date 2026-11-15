@@ -58,10 +58,12 @@ def _first_token(name: str) -> str:
     return words[0] if words else ""
 
 
-def _word_in(haystack: str, needle: str) -> bool:
+def _word_in(haystack: str, needle: str, case_sensitive: bool = False) -> bool:
+    """Whole-word search. Tickers are matched case-sensitively: 'now' is not NOW."""
     if not haystack or not needle:
         return False
-    return re.search(r"\b" + re.escape(needle) + r"\b", haystack, re.IGNORECASE) is not None
+    flags = 0 if case_sensitive else re.IGNORECASE
+    return re.search(r"\b" + re.escape(needle) + r"\b", haystack, flags) is not None
 
 
 def _clean_query_name(name: str) -> str:
@@ -95,15 +97,13 @@ def _query_name_batches(names: list[str], max_name_chars: int) -> list[str]:
 
 
 def _ticker_mentioned(raw: str, ticker: str) -> bool:
-    """True if the article cites this ticker, not an English word like 'meta'."""
+    """True if the article cites this ticker in capitals, not an English word like 'meta' or 'now'."""
+    if _word_in(raw, ticker, case_sensitive=True):
+        return True
     root = ticker.split(".", 1)[0]
     if root.lower() in _GENERIC_NAME_TOKENS:
-        return re.search(r"\b" + re.escape(ticker) + r"\b", raw) is not None
-    if _word_in(raw, ticker):
-        return True
-    if "." in ticker and len(root) >= 4 and _word_in(raw, root):
-        return True
-    return False
+        return False
+    return "." in ticker and len(root) >= 4 and _word_in(raw, root, case_sensitive=True)
 
 
 def _name_phrases(name: str) -> list[str]:
