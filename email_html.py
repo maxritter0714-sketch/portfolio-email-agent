@@ -506,40 +506,9 @@ def _optional_sections_html(
     return out
 
 
-# ── HTML email builder ────────────────────────────────────────────────────────
-def build_html_email(
-    positions: list[dict],
-    summary: dict,
-    benchmarks: list[dict],
-    port_news: list[dict],
-    gen_news: list[dict],
-    analysis_body: str,
-    actionable_items: list[dict],
-    headline: str,
-    chart_cids: dict[str, str],
-    metrics: dict,
-    issue_num: int,
-    unknown_fx: list[dict] | None = None,
-    skipped: list[dict] | None = None,
-    allocation: list[dict] | None = None,
-    events: list[dict] | None = None,
-    scorecard: list[dict] | None = None,
-    holdings_as_of: date | None = None,
-    unmapped: list[dict] | None = None,
-) -> str:
-    today = date.today()
-    breakdown = summary.get("value_breakdown")
-    warning_html = _data_warning_html(
-        today, holdings_as_of, unmapped or [],
-        breakdown["flows_as_of"] if breakdown else None,
-    )
-    breakdown_html = _breakdown_html(breakdown) if breakdown else ""
-    today_str = today.strftime("%B %-d, %Y") if os.name != "nt" else today.strftime("%B %d, %Y").replace(" 0", " ")
-
-    total = summary["total_value_eur"]
-    fortnight_pct = summary["fortnight_pct"]
-    fortnight_pl = _pl_from_pct(total, fortnight_pct)
-    fortnight_color = _color(fortnight_pl)
+# ── Email sections ─────────────────────────────────────────────────────────────
+def _masthead_stats_html(summary: dict, breakdown: dict | None) -> tuple[str, str]:
+    """Return cells under the masthead total, and the caption that explains them."""
     vs_jan       = summary.get("value_vs_jan_pct")
     lifetime     = summary.get("lifetime")
     # (label, pct, euro amount, caption); fortnight already leads the masthead.
@@ -561,11 +530,11 @@ def build_html_email(
         _mast_stat_cell(label, pct, mast_w, caption, amount)
         for label, pct, amount, caption in stats
     )
+    return mast_stats, holdings_caption
 
-    # ── Headline ──────────────────────────────────────────────────────────────
-    headline_html = _emphasize_numbers(headline)
 
-    # ── Primary metric strip ──────────────────────────────────────────────────
+def _metrics_html(metrics: dict, summary: dict) -> str:
+    """The two strips of risk figures; empty when no figures could be computed."""
     def tile(label: str, key: str, spec: str, interp, scale: float = 1.0, suffix: str = "") -> tuple[str, str, str]:
         """(label, value, caption) for one risk figure; "n/a" when it could not be computed."""
         value = metrics.get(key)
@@ -653,17 +622,21 @@ def build_html_email(
   <table class="metric-s-table" width="100%" cellpadding="0" cellspacing="0">{sec_rows}</table>
 </div>
 """
+    return metrics_html
 
-    # ── Positions table ───────────────────────────────────────────────────────
-    def _th(label: str, align: str = "left", cls: str = "") -> str:
-        cls_attr = f' class="{cls}"' if cls else ""
-        return (
-            f'<th{cls_attr} style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
-            f'text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};'
-            f'text-align:{align};padding:10px 4px;white-space:nowrap;border-bottom:1px solid {TEXT_PRIMARY};'
-            f'font-weight:600">{label}</th>'
-        )
 
+def _pos_th(label: str, align: str = "left", cls: str = "") -> str:
+    cls_attr = f' class="{cls}"' if cls else ""
+    return (
+        f'<th{cls_attr} style="font-family:Arial,Helvetica,sans-serif;font-size:10px;'
+        f'text-transform:uppercase;letter-spacing:2px;color:{TEXT_SECONDARY};'
+        f'text-align:{align};padding:10px 4px;white-space:nowrap;border-bottom:1px solid {TEXT_PRIMARY};'
+        f'font-weight:600">{label}</th>'
+    )
+
+
+def _positions_rows_html(positions: list[dict], total: float) -> str:
+    """One table row per holding: weight, value, window returns and P&L."""
     def _num_td(text: str, color: str = TEXT_PRIMARY, cls: str = "") -> str:
         cls_attr = f' class="{cls}"' if cls else ""
         return (
@@ -694,8 +667,11 @@ def build_html_email(
             + _pct_td(p["pl_pct"])
             + '</tr>'
         )
+    return pos_rows_html
 
-    # ── By the Numbers (charts) ───────────────────────────────────────────────
+
+def _figures_html(chart_cids: dict[str, str]) -> str:
+    """The charts that were generated, numbered in a fixed order."""
     fig_order = [
         ("history_line",  "Portfolio vs S&P 500 (Indexed)"),
         ("portfolio_pie", "Portfolio Allocation"),
@@ -709,12 +685,11 @@ def build_html_email(
         if key in chart_cids:
             figs_html += _fig_caption(n, label, chart_cids[key])
             n += 1
+    return figs_html
 
-    # ── The Analysis ──────────────────────────────────────────────────────────
-    analysis_html = _markdown_to_html(analysis_body)
-    analysis_html = _analysis_with_drop_cap(analysis_html)
 
-    # ── Portfolio News (numbered 01-10) ───────────────────────────────────────
+def _port_news_html(port_news: list[dict]) -> str:
+    """Numbered headlines about the holdings, tagged with the tickers they concern."""
     port_news_html = ""
     for i, a in enumerate(port_news, 1):
         tickers_html = ""
@@ -749,8 +724,11 @@ def build_html_email(
             f'<p style="font-family:Georgia,serif;color:{TEXT_SECONDARY};font-style:italic">'
             f'No portfolio news available this fortnight.</p>'
         )
+    return port_news_html
 
-    # ── The World (5 general) ─────────────────────────────────────────────────
+
+def _world_news_html(gen_news: list[dict]) -> str:
+    """General headlines, each under its category label."""
     cat_color = {"POLITICS": BURGUNDY, "ECONOMY": SAGE, "SCIENCE": NAVY}
     gen_news_html = ""
     for a in gen_news:
@@ -783,8 +761,11 @@ def build_html_email(
             f'<p style="font-family:Georgia,serif;color:{TEXT_SECONDARY};font-style:italic">'
             f'No general news available this fortnight.</p>'
         )
+    return gen_news_html
 
-    # ── Actionable ────────────────────────────────────────────────────────────
+
+def _actionable_html(actionable_items: list[dict]) -> str:
+    """Numbered suggestions with their action label."""
     action_color_map = {"TRIM": SAGE, "EXIT": BURGUNDY, "RESEARCH": NAVY, "ADD": GOLD}
     actionable_html = ""
     for i, item in enumerate(actionable_items, 1):
@@ -817,7 +798,18 @@ def build_html_email(
             f'<p style="font-family:Georgia,serif;color:{TEXT_SECONDARY};font-style:italic">'
             f'No specific actions recommended this fortnight.</p>'
         )
+    return actionable_html
 
+
+def _data_notes_html(
+    holdings_as_of: date | None,
+    breakdown: dict | None,
+    unmapped: list[dict] | None,
+    metrics: dict,
+    skipped: list[dict] | None,
+    unknown_fx: list[dict] | None,
+) -> str:
+    """Small print under the report: data dates, method notes and anything left out."""
     unknown_fx = unknown_fx or []
     skipped = skipped or []
     unmapped = unmapped or []
@@ -867,6 +859,56 @@ def build_html_email(
             f'{" ".join(notes_parts)}'
             f'</p></div>'
         )
+    return data_notes_html
+
+
+# ── HTML email builder ────────────────────────────────────────────────────────
+def build_html_email(
+    positions: list[dict],
+    summary: dict,
+    benchmarks: list[dict],
+    port_news: list[dict],
+    gen_news: list[dict],
+    analysis_body: str,
+    actionable_items: list[dict],
+    headline: str,
+    chart_cids: dict[str, str],
+    metrics: dict,
+    issue_num: int,
+    unknown_fx: list[dict] | None = None,
+    skipped: list[dict] | None = None,
+    allocation: list[dict] | None = None,
+    events: list[dict] | None = None,
+    scorecard: list[dict] | None = None,
+    holdings_as_of: date | None = None,
+    unmapped: list[dict] | None = None,
+) -> str:
+    today = date.today()
+    breakdown = summary.get("value_breakdown")
+    warning_html = _data_warning_html(
+        today, holdings_as_of, unmapped or [],
+        breakdown["flows_as_of"] if breakdown else None,
+    )
+    breakdown_html = _breakdown_html(breakdown) if breakdown else ""
+    today_str = today.strftime("%B %-d, %Y") if os.name != "nt" else today.strftime("%B %d, %Y").replace(" 0", " ")
+
+    total = summary["total_value_eur"]
+    fortnight_pct = summary["fortnight_pct"]
+    fortnight_pl = _pl_from_pct(total, fortnight_pct)
+    fortnight_color = _color(fortnight_pl)
+    mast_stats, holdings_caption = _masthead_stats_html(summary, breakdown)
+
+    headline_html = _emphasize_numbers(headline)
+    metrics_html = _metrics_html(metrics, summary)
+    pos_rows_html = _positions_rows_html(positions, total)
+    figs_html = _figures_html(chart_cids)
+    analysis_html = _analysis_with_drop_cap(_markdown_to_html(analysis_body))
+    port_news_html = _port_news_html(port_news)
+    gen_news_html = _world_news_html(gen_news)
+    actionable_html = _actionable_html(actionable_items)
+    data_notes_html = _data_notes_html(
+        holdings_as_of, breakdown, unmapped, metrics, skipped, unknown_fx,
+    )
 
     # ── Full HTML ─────────────────────────────────────────────────────────────
     return f"""<!DOCTYPE html>
@@ -944,13 +986,13 @@ def build_html_email(
   {_sect_header("I", "Positions")}
   <table width="100%" cellpadding="0" cellspacing="0">
     <thead><tr>
-      {_th("Holding", "left")}
-      {_th("Weight", "right", "hide-mobile")}
-      {_th("Value", "right")}
-      {_th("2W", "right")}
-      {_th("1M", "right", "hide-mobile")}
-      {_th("YTD", "right")}
-      {_th("P&amp;L", "right")}
+      {_pos_th("Holding", "left")}
+      {_pos_th("Weight", "right", "hide-mobile")}
+      {_pos_th("Value", "right")}
+      {_pos_th("2W", "right")}
+      {_pos_th("1M", "right", "hide-mobile")}
+      {_pos_th("YTD", "right")}
+      {_pos_th("P&amp;L", "right")}
     </tr></thead>
     <tbody>{pos_rows_html}</tbody>
   </table>
