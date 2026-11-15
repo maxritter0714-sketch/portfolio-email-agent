@@ -6,7 +6,7 @@ workflow, ISIN map rules, and commit style — read it first. This file only
 adds notes for other agents, mostly used for code review.
 
 ## Review notes
-- Python 3.11. Run tests with `pytest -q` (same as CI, `.github/workflows/test.yml`).
+- Python 3.11. Run `ruff check .` and `pytest -q` (same as CI, `.github/workflows/test.yml`).
 - Tests are pure-function tests without HTTP mocking — don't flag missing
   network mocks as a gap.
 - Architectural decisions live in `.claude/decisions/` (ADRs, gitignored —

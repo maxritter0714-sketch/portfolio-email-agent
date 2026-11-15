@@ -2,8 +2,9 @@
 """
 Portfolio Email Agent
 Fetches market data, news, and Claude AI analysis, then sends an editorial-style
-HTML portfolio report via Gmail. Collects data every Saturday; sends the email
-every other Saturday (every 14 days from 11 Jan 2025). Bypass with --force.
+HTML portfolio report via Gmail. Sends every other Saturday (every 14 days
+from 11 Jan 2025); --force skips that check. --data-only writes the trading
+day's row to history.csv and nothing else, which the weekday snapshot runs.
 """
 
 import argparse

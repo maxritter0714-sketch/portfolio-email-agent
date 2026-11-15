@@ -193,6 +193,8 @@ ISINs are resolved in this order: your `data/isin_map.json` overrides → [OpenF
 cp data/isin_map.json.example data/isin_map.json   # only if you need overrides
 ```
 
+The import stops without rewriting `portfolio.csv` when a share count or price in the export can't be read, or when OpenFIGI can't be reached after three attempts. Otherwise those holdings would silently drop out.
+
 > OpenFIGI allows 25 requests/min without a key and 250/min with a free one (`OPENFIGI_API_KEY` in `.env`). This only matters with a few hundred holdings.
 
 ### 8 — Target allocation (optional)
@@ -228,7 +230,7 @@ This writes `output/dashboard.html`, a single file that loads Plotly from a CDN.
 - **Backtest of today's portfolio**: today's share counts held unchanged over up to 7 years against the iShares Core S&P 500 and MSCI World ETFs on Xetra, with drawdown, returns by period, monthly heatmap, risk table and rolling metrics. It shows how your current holdings behave, not your past performance
 - **Positions**: return, contribution, volatility, beta, risk share and momentum per holding
 - **Structure**: concentration, diversification ratio, fund costs, order fees, dividends, look-through sectors, regions and currencies, weight vs risk share, correlation heatmap
-- **Simulations**: stress tests (Covid 2020, 2022 rates, 2024 yen carry, 2025 tariffs), a what-if re-weighting tool and a Monte Carlo projection
+- **Simulations**: stress tests (Covid 2020, 2022 rates, 2024 yen carry, 2025 tariffs), a what-if re-weighting tool and a Monte Carlo projection. A holding that wasn't listed during a crisis takes the MSCI World's return times its own beta
 - **Recommendation track record**: every call in `recommendations.csv` against the MSCI World since the day it was made, with hit rates per action
 
 The file contains your holdings and euro amounts. Keep it local, or host it only behind a login.
@@ -258,6 +260,8 @@ HTML email ──→ Gmail SMTP ──→ your inbox
 
 - **Deposit-free history.** Each `history.csv` row chains the EUR price return of your current holdings since the previous trading day. Money paid in or taken out never shows up as performance. The chart appears once four indexed rows exist.
 - **Recommendation memory.** Every call is appended to `recommendations.csv`. Each report reads the open calls from it, dated from the issue that first made them, so Claude can follow up and repeating a call doesn't restart its clock. The email's track record and the dashboard score calls the same way: against the MSCI World since the day they were made.
+- **No row from incomplete data.** Holdings are valued at their close on the S&P 500's last session. If a holding has no price, a currency has no live FX rate or that session can't be read, no `history.csv` row is written and the snapshot run fails, so a gap stays visible instead of a wrong total. The Saturday report still goes out.
+- **No half-written email.** The run stops before sending if Claude's answer is cut off, a section is empty, or no suggestion can be read.
 - **Warnings.** A banner under the masthead flags a holdings or cash-flow export older than 30 days, and holdings whose ISIN couldn't be mapped.
 
 ### What stays private
@@ -300,7 +304,7 @@ python tools/readme_screenshots.py                 # needs: pip install playwrig
 | `dashboard.py`, `analytics.py`, `templates/dashboard.html` | Interactive dashboard |
 | `import_portfolio.py`, `import_cashflows.py` | Finanzfluss imports |
 | `tools/` | Demo data and screenshot scripts |
-| `tests/` | `python -m pytest` |
+| `tests/` | `python -m pytest`; lint with `ruff check .` (both run in CI) |
 
 ## Troubleshooting
 
@@ -311,6 +315,8 @@ python tools/readme_screenshots.py                 # needs: pip install playwrig
 | Gmail authentication error | Re-create the App Password; 2-Step Verification must be on |
 | NewsAPI returns no articles | The free tier has query limits; try simpler company names |
 | Claude API error | Check `ANTHROPIC_API_KEY` and your credit balance |
+| Snapshot workflow fails with `History row not written` | The log names the holding or currency without data. That day stays a gap; later days are written as usual once Yahoo delivers again |
+| `Error: OpenFIGI could not be reached` | Run the import (or the workflow) again later; `portfolio.csv` was left untouched |
 | History chart missing | It needs four indexed rows in `history.csv`, i.e. four trading days of snapshots |
 
 All runs are logged to `output/agent.log`.
